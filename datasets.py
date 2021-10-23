@@ -3,6 +3,7 @@ from scipy import integrate
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+np.random.seed(0)
 
 INTEGRAL_DIV = 10000
 
@@ -58,7 +59,7 @@ def calc_dist_r(n_dim, sigma, R, div=INTEGRAL_DIV):
     return r_array, cum_dens
 
 
-def create_dataset(n_nodes, n_dim, R, sigma, T):
+def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, T):
     # n_dimは2以上で
     x_polar = np.random.uniform(0, 1, (n_nodes, n_dim))
     # 逆関数法で点を双曲空間からサンプリング
@@ -91,10 +92,11 @@ def create_dataset(n_nodes, n_dim, R, sigma, T):
 
     # print(adj_mat)
     # print(np.sum(adj_mat, axis=1))
-    hist=np.sum(adj_mat, axis=1)
+    # hist=np.sum(adj_mat, axis=1)
     # plt.hist(hist)
     # plt.show()
     # plt.pause(1)
+    return adj_mat
 
 
 def convert_euclid(x_polar):
@@ -113,7 +115,5 @@ def convert_euclid(x_polar):
     return x_euclid
 
 if __name__=='__main__':
-    adj_mat=create_dataset(n_nodes=1000, n_dim=10, R=10, sigma=1, T=2)
+    adj_mat=hyperbolic_geometric_graph(n_nodes=1000, n_dim=10, R=10, sigma=1, T=2)
 
-# print(calc_dist_r(2, 1, 30))
-# print(calc_dist_angle(3, 1))
