@@ -67,30 +67,17 @@ def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, T):
         for j in range(n_nodes):
             idx = np.max(np.where(cum_dens <= x_polar[j, i])[0])
             x_polar[j, i] = val_array[idx]
-    # print(x_polar)
     # 直交座標に変換(Euclid)
     x_e = convert_euclid(x_polar)
-    # print(x_e)
-    # print(np.sum(x_e**2, axis=1))
 
     adj_mat = np.zeros((n_nodes, n_nodes))
     for i in range(n_nodes):
         for j in range(i + 1, n_nodes):
             distance = h_dist(x_e[i], x_e[j])
-            # distance=h_dist(np.array([0.9999999,0,0]), np.array([-0.9999999,0,0]))
             prob = connection_prob(distance, R, T)
-            # print(distance)
-            # print(prob)
             if np.random.uniform(0, 1) < prob:
                 adj_mat[i, j] = 1
                 adj_mat[j, i] = 1
-
-    # print(adj_mat)
-    # print(np.sum(adj_mat, axis=1))
-    # hist=np.sum(adj_mat, axis=1)
-    # plt.hist(hist)
-    # plt.show()
-    # plt.pause(1)
     return adj_mat
 
 
