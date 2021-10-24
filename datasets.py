@@ -13,14 +13,9 @@ def e_dist(u, v):
 
 
 def h_dist(u_e, v_e):
-    ret=1
-    ret+=(2*e_dist(u_e, v_e)**2)/((1 - e_dist(0, u_e)**2)*(1 - e_dist(0, v_e)**2))
-    # print('u_e', u_e)
-    # print('v_e', v_e)
-    # print('u_e_dist:', e_dist(0, u_e)**2)
-    # print('v_e_dist:', e_dist(0, v_e)**2)
-    # print('u_v_e_dist:', e_dist(u_e, v_e)**2)
-    # print('ret:', ret)
+    ret = 1
+    ret += (2 * e_dist(u_e, v_e)**2) / \
+        ((1 - e_dist(0, u_e)**2) * (1 - e_dist(0, v_e)**2))
     return np.arccosh(ret)
 
 
@@ -80,15 +75,15 @@ def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, T):
 
     adj_mat = np.zeros((n_nodes, n_nodes))
     for i in range(n_nodes):
-        for j in range(i+1, n_nodes):
-            distance=h_dist(x_e[i], x_e[j])
+        for j in range(i + 1, n_nodes):
+            distance = h_dist(x_e[i], x_e[j])
             # distance=h_dist(np.array([0.9999999,0,0]), np.array([-0.9999999,0,0]))
-            prob=connection_prob(distance, R, T)
+            prob = connection_prob(distance, R, T)
             # print(distance)
             # print(prob)
-            if np.random.uniform(0,1)<prob:
-                adj_mat[i,j]=1
-                adj_mat[j,i]=1
+            if np.random.uniform(0, 1) < prob:
+                adj_mat[i, j] = 1
+                adj_mat[j, i] = 1
 
     # print(adj_mat)
     # print(np.sum(adj_mat, axis=1))
@@ -103,7 +98,8 @@ def convert_euclid(x_polar):
     n_nodes = x_polar.shape[0]
     n_dim = x_polar.shape[1]
     x_euclid = np.zeros((n_nodes, n_dim))
-    radius = np.sqrt((np.cosh(x_polar[:, 0]) - 1) / (np.cosh(x_polar[:, 0]) + 1))
+    radius = np.sqrt(
+        (np.cosh(x_polar[:, 0]) - 1) / (np.cosh(x_polar[:, 0]) + 1))
     for i in range(n_dim):
         x_euclid[:, i] = radius
         for j in range(0, i + 1):
@@ -114,6 +110,6 @@ def convert_euclid(x_polar):
                     x_euclid[:, i] *= np.sin(x_polar[:, j + 1])
     return x_euclid
 
-if __name__=='__main__':
-    adj_mat=hyperbolic_geometric_graph(n_nodes=1000, n_dim=10, R=10, sigma=1, T=2)
-
+if __name__ == '__main__':
+    adj_mat = hyperbolic_geometric_graph(
+        n_nodes=1000, n_dim=10, R=10, sigma=1, T=2)
