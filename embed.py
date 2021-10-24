@@ -1,3 +1,5 @@
+import warnings
+warnings.simplefilter('ignore', UserWarning)
 import os
 import sys
 import torch
@@ -12,6 +14,10 @@ from tensorboardX import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
 from datasets import hyperbolic_geometric_graph, connection_prob
 from copy import deepcopy
+import multiprocessing as multi
+from functools import partial
+from multiprocessing import Pool
+import pandas as pd
 
 np.random.seed(0)
 
@@ -26,6 +32,7 @@ def create_dataset(
     n_max_negatives=10,
     val_size=0.1
 ):
+    # データセットを作成し、trainとvalidationに分ける
     _adj_mat = deepcopy(adj_mat)
     n_nodes = _adj_mat.shape[0]
     for i in range(n_nodes):
@@ -63,6 +70,20 @@ def create_dataset(
     train = data[0:int(len(data) * (1 - val_size))]
     val = data[int(len(data) * (1 - val_size)):]
     return train, val
+
+
+def create_prob_matrix(x_e, n_nodes, R, T):
+
+    prob_mat = np.zeros((n_nodes, n_nodes))
+    for i in range(n_nodes):
+        for j in range(i + 1, n_nodes):
+            distance = h_dist(x_e[i].reshape((1, -1)),
+                              x_e[j].reshape((1, -1)))[0]
+            prob = connection_prob(distance, R, T)
+            prob_mat[i, j] = prob
+            prob_mat[j, i] = prob
+
+    return prob_mat
 
 
 def get_unobserved(
@@ -107,7 +128,7 @@ class SamplingGraph(Dataset):
         self,
         adj_mat,
         n_max_data=1100,
-        positive_size=1 / 11,
+        positive_size=1 / 2,  # 一様にしないという手もある。
     ):
         self.adj_mat = deepcopy(adj_mat)
         self.n_nodes = self.adj_mat.shape[0]
@@ -118,6 +139,7 @@ class SamplingGraph(Dataset):
         data_unobserved = np.array(np.where(self.adj_mat != -1)).T
         data_unobserved = np.random.permutation(data_unobserved)
         n_data = min(n_max_data, len(data_unobserved))
+        self.n_possibles = 2 * len(data_unobserved)
         data_sampled = data_unobserved[:n_data]
         # ラベルを人工的に作成する。
         labels = np.zeros(n_data)
@@ -136,8 +158,12 @@ class SamplingGraph(Dataset):
         # ノードとラベルを返す。
         return self.data[i, 0:2], self.data[i, 2]
 
+    def get_all_data(self):
+        return self.data[:, 0:2], self.data[:, 2], self.n_possibles
 
-def retraction(theta, R_e):
+
+def projection(theta, R_e):
+    # 多様体に入るようR_eの半径の円に押し込める。
     theta_norm = torch.norm(theta, dim=1)
     for i, norm in enumerate(theta_norm):
         if norm > R_e:
@@ -160,22 +186,17 @@ class RSGD(optim.Optimizer):
                 if p.grad is None:
                     continue
 
+                # 勾配を元に更新。
+                # torch.normがdim=1方向にまとめていることに注意。
                 update = torch.clone(p.data)
                 update -= group["learning_rate"] * \
-                    p.grad.data * ((1 - (torch.norm(p, dim=1)**2).reshape((-1,1)))**2 / 4)
-                print('p:', p)
-                print('p.grad:',p.grad.data)
-                print('dif:', -group["learning_rate"]* \
-                    p.grad.data* \
-                    (((1-torch.norm(p)**2))**2/4))
-                print('update:', update)
-                print('一つ目の項:',group["learning_rate"])
-                print('二つ目の項:',((1 - (torch.norm(p, dim=1)**2).reshape((-1,1)))**2 / 4))
+                    p.grad.data * \
+                    ((1 - (torch.norm(p, dim=1)**2).reshape((-1, 1)))**2 / 4)
                 # 発散したところなどを補正
                 is_nan_inf = torch.isnan(update) | torch.isinf(update)
                 update = torch.where(is_nan_inf, p, update)
                 # 半径R_eの球に入るように縮小
-                retraction(update, group["R_e"])
+                projection(update, group["R_e"])
                 # pのアップデート
                 p.data.copy_(update)
 
@@ -214,16 +235,12 @@ class Poincare(nn.Module):
         pairs,
         labels
     ):
-        # 座標
+        # 座標を取得
         us = self.table(pairs[:, 0])
         vs = self.table(pairs[:, 1])
 
         # ロス計算
         dist = h_dist(us, vs)
-        # prob_pos=1/(torch.exp((dist-self.R)/self.T)+1)
-        # loss=-labels*torch.log(prob_pos)-(1-labels)*torch.log(1-prob_pos)
-        # print(loss)
-
         loss = torch.clone(labels).float()
         loss = torch.where(loss == 1, torch.log(torch.exp(
             (dist - self.R) / self.T) + 1), torch.log(1 + 1 / torch.exp((dist - self.R) / self.T)))
@@ -233,118 +250,183 @@ class Poincare(nn.Module):
         return self.table.weight.data.numpy()
 
 
+def _mle(idx, model, pairs, labels, n_iter, learning_rate, R):
+    # あるデータの尤度を計算する補助関数。
+    _model = deepcopy(model)
+    rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
+                R=R)
+    pair = pairs[idx].reshape((1, -1))
+    label = labels[idx].reshape((1, -1))
+
+    for _ in range(n_iter):
+        rsgd.zero_grad()
+        loss = model(pair, label).mean()
+        loss.backward()
+        rsgd.step()
+
+    return loss.item()
+
+
+def calc_pc(model, pairs, labels, n_possibles, n_iter, learning_rate, R):
+    # parametric complexityをサンプリングで計算する補助関数。
+    n_samples = len(labels)
+
+    mle = partial(_mle, model=model, pairs=pairs, labels=labels,
+                  n_iter=n_iter, learning_rate=learning_rate, R=R)
+
+    ctx = multi.get_context('spawn')  # pytorchを使うときはこれを使わないとダメらしい。
+    p = ctx.Pool(multi.cpu_count() - 1)
+    args = list(range(n_samples))
+    res = p.map(mle, args)
+    p.close()
+    # resは-log p
+    res = -np.array(res)  # log p
+    res = np.exp(res)  # p
+    res = np.mean(res)  # pの平均
+
+    return np.log(n_possibles) + np.log(res)
+
 if __name__ == '__main__':
+
     # データセット作成
     params_dataset = {
-        'n_nodes': 10,
-        'n_dim': 2,
+        'n_nodes': 500,
+        'n_dim': 8,
         'R': 10,
         'sigma': 1,
         'T': 2
     }
-    adj_mat = hyperbolic_geometric_graph(
-        n_nodes=params_dataset['n_nodes'],
-        n_dim=params_dataset['n_dim'],
-        R=params_dataset['R'],
-        sigma=params_dataset['sigma'],
-        T=params_dataset['T']
-    )
-    # adj_mat=np.array([
-    #     [0,0,1],
-    #     [0,0,1],
-    #     [1,1,0]
-    # ])
-    train, val = create_dataset(
-        adj_mat=adj_mat,
-        n_max_positives=2,
-        n_max_negatives=10,
-        val_size=0.1
-    )
-
-    print('average degree:', np.sum(adj_mat) / len(adj_mat))
-
-    u_adj_mat = get_unobserved(adj_mat, train)
 
     # パラメータ
-    burn_epochs = 100
+    burn_epochs = 50
     learning_rate = 10
     burn_batch_size = 16
-    # snml_epochs = 100
-    # snml_learning_rate = 0.01
+    # SNML用
+    snml_n_iter = 10
+    snml_learning_rate = 0.01
+    snml_n_max_data = 500
+    # それ以外
     loader_workers = 16
     shuffle = True
 
-    # burn-inでの処理
-    dataloader = DataLoader(
-        Graph(train),
-        shuffle=shuffle,
-        batch_size=burn_batch_size,
-        num_workers=loader_workers,
-    )
+    model_n_dims = [2, 4, 8, 16, 32]
 
-    print(train)
+    result = pd.DataFrame()
 
-    # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
-    model = Poincare(
-        n_nodes=params_dataset['n_nodes'],
-        n_dim=params_dataset['n_dim'],
-        R=params_dataset['R'],
-        T=params_dataset['T'],
-        init_range=0.1
-    )
+    for n_graph in range(5): # データ5本で性能比較
+        print("n_graph:", n_graph)
+        # 隣接行列
+        adj_mat = hyperbolic_geometric_graph(
+            n_nodes=params_dataset['n_nodes'],
+            n_dim=params_dataset['n_dim'],
+            R=params_dataset['R'],
+            sigma=params_dataset['sigma'],
+            T=params_dataset['T']
+        )
+        train, val = create_dataset(
+            adj_mat=adj_mat,
+            n_max_positives=2,
+            n_max_negatives=10,
+            val_size=0.02
+        )
 
-    rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
-                R=params_dataset['R'])
-    rsgd.learning_rate=learning_rate
-    # pairs, labels=iter(dataloader).next()
-    # # print(pairs)
-    # # print(labels)
-    # pairs=torch.Tensor([0,1]).reshape(-1,2).long()
-    # labels=torch.Tensor([0]).long()
+        print(len(val))
 
-    # print(model.get_poincare_table())
+        # 平均次数が少なくなるように手で調整する用
+        print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
-    # for i in range(10000):
-    #     rsgd.zero_grad()
-    #     loss=model(pairs, labels).mean()
-    #     loss.backward()
-    #     rsgd.step()
+        u_adj_mat = get_unobserved(adj_mat, train)
 
-    # print(model.get_poincare_table())
 
-    loss_history = []
+        for model_n_dim in model_n_dims:
+            print("model_n_dim:", model_n_dim)
+            # burn-inでの処理
+            dataloader = DataLoader(
+                Graph(train),
+                shuffle=shuffle,
+                batch_size=burn_batch_size,
+                num_workers=loader_workers,
+            )
 
-    for epoch in range(burn_epochs):
-        print(epoch)
-        losses = []
-        if epoch%10==9:
-            rsgd.learning_rate/=10
-        print(rsgd.learning_rate)
-        for pairs, labels in dataloader:
-            rsgd.zero_grad()
-            loss = model(pairs, labels).mean()
-            loss.backward()
-            rsgd.step()
-            losses.append(loss)
+            # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
+            # 平均次数とかから逆算できる気がする。
+            model = Poincare(
+                n_nodes=params_dataset['n_nodes'],
+                n_dim=model_n_dim,  # モデルの次元
+                R=params_dataset['R'],
+                T=params_dataset['T'],
+                init_range=0.001
+            )
+            # 最適化関数。
+            rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
+                        R=params_dataset['R'])
 
-        loss_history.append(torch.Tensor(losses).mean())
-        # print(torch.Tensor(losses).mean())
+            loss_history = []
 
-    print(loss_history)
-    print(adj_mat)
-    print(model.get_poincare_table())
-    x_e = torch.Tensor(model.get_poincare_table())
+            for epoch in range(burn_epochs):
+                if epoch != 0 and epoch % 10 == 0:  # 10 epochごとに学習率を減少
+                    rsgd.param_groups[0]["learning_rate"] /= 5
+                losses = []
+                for pairs, labels in dataloader:
+                    rsgd.zero_grad()
+                    # print(model(pairs, labels))
+                    loss = model(pairs, labels).mean()
+                    loss.backward()
+                    rsgd.step()
+                    losses.append(loss)
 
-    prob_mat = np.zeros((params_dataset['n_nodes'], params_dataset['n_nodes']))
-    for i in range(params_dataset['n_nodes']):
-        for j in range(i + 1, params_dataset['n_nodes']):
-            distance = h_dist(x_e[i].reshape((1, -1)),
-                              x_e[j].reshape((1, -1)))[0]
-            prob = connection_prob(distance, params_dataset[
-                                   'R'], params_dataset['T'])
-            prob_mat[i, j] = prob
-            prob_mat[j, i] = prob
+                loss_history.append(torch.Tensor(losses).mean().item())
+                print("epoch:", epoch, ", loss:",
+                      torch.Tensor(losses).mean().item())
 
-    print(prob_mat)
+            # 以下ではmodelのみを流用する。
+            # snmlの計算処理
+            # こっちは1サンプルずつやる
+            dataloader_snml = DataLoader(
+                Graph(val),
+                shuffle=shuffle,
+                batch_size=1,
+                num_workers=0,
+            )
 
-    # snmlの計算処理
+            snml_codelength = 0
+            snml_codelength_history = []
+
+            for pair, label in dataloader_snml:
+
+                # parametric complexityのサンプリングによる計算
+                sampling_data = SamplingGraph(
+                    adj_mat=u_adj_mat,
+                    n_max_data=snml_n_max_data,
+                    positive_size=1 / 2  # 一様サンプリング以外は実装の修正が必要。
+                )
+                pairs, labels, n_possibles = sampling_data.get_all_data()
+
+                snml_pc = calc_pc(model, pairs, labels, n_possibles,
+                                  snml_n_iter, snml_learning_rate, params_dataset['R'])
+
+                # valのデータでの尤度
+                rsgd = RSGD(model.parameters(), learning_rate=snml_learning_rate,
+                            R=params_dataset['R'])
+                for _ in range(snml_n_iter):
+                    rsgd.zero_grad()
+                    loss = model(pair, label).mean()
+                    loss.backward()
+                    rsgd.step()
+
+                snml_codelength += loss.item() + snml_pc
+                print('snml_codelength:', snml_codelength)
+                # print('-log p:', loss.item())
+                # print('snml_pc:', snml_pc)
+
+                # valで使用したデータの削除
+                u_adj_mat[pair[0, 0], pair[0, 1]] = -1
+                u_adj_mat[pair[0, 1], pair[0, 0]] = -1
+
+                snml_codelength_history.append(snml_codelength)
+
+            df_row = pd.DataFrame(
+                {"model_n_dim": [model_n_dim], "snml_codelength": snml_codelength_history[-1]})
+            result = pd.concat([result, df_row], axis=0)
+
+        result.to_csv("result_"+str(n_graph)+".csv", index=False)
