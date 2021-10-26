@@ -1,5 +1,6 @@
 import warnings
-warnings.simplefilter('ignore', UserWarning)
+warnings.simplefilter('ignore')
+# ParallelNativeやpytorchから要求されるwarningを無視する。
 import os
 import sys
 import torch
@@ -18,6 +19,7 @@ import multiprocessing as multi
 from functools import partial
 from multiprocessing import Pool
 import pandas as pd
+import gc
 
 np.random.seed(0)
 
@@ -54,6 +56,8 @@ def create_dataset(
             data.append((i, j, 1))  # positive sample
             _adj_mat[i, j] = -1
             _adj_mat[j, i] = -1
+
+        for _ in range(n_max_positives):
 
             # 負例が不足した場合に備える。
             n_negatives = min(len(idx_negatives), n_max_negatives)
@@ -250,7 +254,7 @@ class Poincare(nn.Module):
         return self.table.weight.data.numpy()
 
 
-def _mle(idx, model, pairs, labels, n_iter, learning_rate, R):
+def _mle(idx, model, pairs, labels, n_iter, learning_rate, R, dataset):
     # あるデータの尤度を計算する補助関数。
     _model = deepcopy(model)
     rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
@@ -258,21 +262,36 @@ def _mle(idx, model, pairs, labels, n_iter, learning_rate, R):
     pair = pairs[idx].reshape((1, -1))
     label = labels[idx].reshape((1, -1))
 
+    # uとvに関わるデータを5個ずつサンプリングする。
+    u = pair[0, 0].item()
+    v = pair[0, 1].item()
+    u_indice = np.union1d(np.where(dataset[:, 0] == u)[
+                          0], np.where(dataset[:, 1] == u)[0])
+    u_indice = np.random.permutation(u_indice)[0:5]
+    v_indice = np.union1d(np.where(dataset[:, 0] == v)[
+                          0], np.where(dataset[:, 1] == v)[0])
+    v_indice = np.random.permutation(v_indice)[0:5]
+
+    pair_ = torch.cat((pair, torch.Tensor(
+        dataset[u_indice, 0:2]), torch.Tensor(dataset[v_indice, 0:2])), dim=0).long()
+    label_ = torch.cat((label, torch.Tensor(dataset[
+                       u_indice, 2].reshape(-1, 1)), torch.Tensor(dataset[v_indice, 2]).reshape(-1, 1)), dim=0).long()
+
     for _ in range(n_iter):
         rsgd.zero_grad()
-        loss = model(pair, label).mean()
+        loss = model(pair_, label_).mean()
         loss.backward()
         rsgd.step()
 
-    return loss.item()
+    return model(pair, label).item()
 
 
-def calc_pc(model, pairs, labels, n_possibles, n_iter, learning_rate, R):
+def calc_pc(model, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
     # parametric complexityをサンプリングで計算する補助関数。
     n_samples = len(labels)
 
     mle = partial(_mle, model=model, pairs=pairs, labels=labels,
-                  n_iter=n_iter, learning_rate=learning_rate, R=R)
+                  n_iter=n_iter, learning_rate=learning_rate, R=R, dataset=dataset)
 
     ctx = multi.get_context('spawn')  # pytorchを使うときはこれを使わないとダメらしい。
     p = ctx.Pool(multi.cpu_count() - 1)
@@ -290,8 +309,8 @@ if __name__ == '__main__':
 
     # データセット作成
     params_dataset = {
-        'n_nodes': 500,
-        'n_dim': 8,
+        'n_nodes': 1000,
+        'n_dim': 30,
         'R': 10,
         'sigma': 1,
         'T': 2
@@ -309,11 +328,11 @@ if __name__ == '__main__':
     loader_workers = 16
     shuffle = True
 
-    model_n_dims = [2, 4, 8, 16, 32]
+    model_n_dims = [10,20,30,40,50]
 
     result = pd.DataFrame()
 
-    for n_graph in range(5): # データ5本で性能比較
+    for n_graph in range(10):  # データ5本で性能比較
         print("n_graph:", n_graph)
         # 隣接行列
         adj_mat = hyperbolic_geometric_graph(
@@ -327,7 +346,7 @@ if __name__ == '__main__':
             adj_mat=adj_mat,
             n_max_positives=2,
             n_max_negatives=10,
-            val_size=0.02
+            val_size=0.01
         )
 
         print(len(val))
@@ -336,7 +355,6 @@ if __name__ == '__main__':
         print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
         u_adj_mat = get_unobserved(adj_mat, train)
-
 
         for model_n_dim in model_n_dims:
             print("model_n_dim:", model_n_dim)
@@ -403,18 +421,33 @@ if __name__ == '__main__':
                 pairs, labels, n_possibles = sampling_data.get_all_data()
 
                 snml_pc = calc_pc(model, pairs, labels, n_possibles,
-                                  snml_n_iter, snml_learning_rate, params_dataset['R'])
+                                  snml_n_iter, snml_learning_rate, params_dataset['R'], train)
 
                 # valのデータでの尤度
+                # uとvに関わるデータを5個ずつサンプリングする。
+                u = pair[0, 0].item()
+                v = pair[0, 1].item()
+                u_indice = np.union1d(np.where(train[:, 0] == u)[
+                                      0], np.where(train[:, 1] == u)[0])
+                u_indice = np.random.permutation(u_indice)[0:5]
+                v_indice = np.union1d(np.where(train[:, 0] == v)[
+                                      0], np.where(train[:, 1] == v)[0])
+                v_indice = np.random.permutation(v_indice)[0:5]
+
+                pair_ = torch.cat((pair, torch.Tensor(
+                    train[u_indice, 0:2]), torch.Tensor(train[v_indice, 0:2])), dim=0).long()
+                label_ = torch.cat((label.reshape(-1,1), torch.Tensor(train[u_indice, 2]).reshape(
+                    -1, 1), torch.Tensor(train[v_indice, 2]).reshape(-1, 1)), dim=0).long()
+
                 rsgd = RSGD(model.parameters(), learning_rate=snml_learning_rate,
                             R=params_dataset['R'])
                 for _ in range(snml_n_iter):
                     rsgd.zero_grad()
-                    loss = model(pair, label).mean()
+                    loss = model(pair_, label_).mean()
                     loss.backward()
                     rsgd.step()
 
-                snml_codelength += loss.item() + snml_pc
+                snml_codelength += model(pair, label).item() + snml_pc
                 print('snml_codelength:', snml_codelength)
                 # print('-log p:', loss.item())
                 # print('snml_pc:', snml_pc)
@@ -423,10 +456,26 @@ if __name__ == '__main__':
                 u_adj_mat[pair[0, 0], pair[0, 1]] = -1
                 u_adj_mat[pair[0, 1], pair[0, 0]] = -1
 
+                # データセットを更新する。
+                val_ = np.array([pair[0, 0], pair[0, 1], label[0]]).reshape((1, -1))
+                train = np.concatenate([train, val], axis=0)
+
                 snml_codelength_history.append(snml_codelength)
+
+            del dataloader
+            del dataloader_snml
+            gc.collect()
 
             df_row = pd.DataFrame(
                 {"model_n_dim": [model_n_dim], "snml_codelength": snml_codelength_history[-1]})
             result = pd.concat([result, df_row], axis=0)
 
-        result.to_csv("result_"+str(n_graph)+".csv", index=False)
+        del train
+        del val
+        del adj_mat
+        del u_adj_mat
+
+        gc.collect()
+
+
+        result.to_csv("result_" + str(n_graph) + ".csv", index=False)
