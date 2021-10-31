@@ -23,6 +23,9 @@ import gc
 
 np.random.seed(0)
 
+# narrow: 次元を指定し、指定した長さのデータを切り取る
+# clamp: 最大値と最小値で抑える関数
+
 
 def arcosh(x):
     return torch.log(x + torch.sqrt(x ** 2 - 1))
@@ -166,12 +169,12 @@ class SamplingGraph(Dataset):
         return self.data[:, 0:2], self.data[:, 2], self.n_possibles
 
 
-def projection(theta, R_e):
-    # 多様体に入るようR_eの半径の円に押し込める。
-    theta_norm = torch.norm(theta, dim=1)
-    for i, norm in enumerate(theta_norm):
-        if norm > R_e:
-            theta[i] = (theta[i] * R_e) / norm
+# def projection(theta, R_e):
+#     # 多様体に入るようR_eの半径の円に押し込める。
+#     theta_norm = torch.norm(theta, dim=1)
+#     for i, norm in enumerate(theta_norm):
+#         if norm > R_e:
+#             theta[i] = (theta[i] * R_e) / norm
 
 
 class RSGD(optim.Optimizer):
@@ -190,17 +193,31 @@ class RSGD(optim.Optimizer):
                 if p.grad is None:
                     continue
 
-                # 勾配を元に更新。
-                # torch.normがdim=1方向にまとめていることに注意。
-                update = torch.clone(p.data)
-                update -= group["learning_rate"] * \
-                    p.grad.data * \
-                    ((1 - (torch.norm(p, dim=1)**2).reshape((-1, 1)))**2 / 4)
+                d_p = p.grad.data
+
+                if d_p.is_sparse:
+                    p_sqnorm = torch.sum(
+                        p[d_p._indices()[0].squeeze()] ** 2, dim=1,
+                        keepdim=True
+                    ).expand_as(d_p._values())
+                    n_vals = d_p._values() * ((1 - p_sqnorm) ** 2) / 4
+                    d_p = torch.sparse.DoubleTensor(
+                        d_p._indices(), n_vals, d_p.size())
+                    update = p.data - group["learning_rate"] * d_p
+
+                else:
+                    # 勾配を元に更新。
+                    # torch.normがdim=1方向にまとめていることに注意。
+                    update = torch.clone(p.data)
+                    update -= group["learning_rate"] * \
+                        d_p * \
+                        ((1 - (torch.norm(p, dim=1)**2).reshape((-1, 1)))**2 / 4)
                 # 発散したところなどを補正
                 is_nan_inf = torch.isnan(update) | torch.isinf(update)
                 update = torch.where(is_nan_inf, p, update)
                 # 半径R_eの球に入るように縮小
-                projection(update, group["R_e"])
+                # projection(update, group["R_e"])
+                update.renorm_(p=2, dim=0, maxnorm=group["R_e"])
                 # pのアップデート
                 p.data.copy_(update)
 
@@ -224,14 +241,15 @@ class Poincare(nn.Module):
         n_dim,
         R,
         T,
-        init_range=0.001
+        init_range=0.001,
+        sparse=True
     ):
         super().__init__()
         self.n_nodes = n_nodes
         self.n_dim = n_dim
         self.T = T
         self.R = R
-        self.table = nn.Embedding(n_nodes, n_dim)
+        self.table = nn.Embedding(n_nodes, n_dim, sparse=sparse)
         nn.init.uniform_(self.table.weight, -init_range, init_range)
 
     def forward(
@@ -283,6 +301,9 @@ def _mle(idx, model, pairs, labels, n_iter, learning_rate, R, dataset):
         loss.backward()
         rsgd.step()
 
+    del pair_
+    del label_
+
     return model(pair, label).item()
 
 
@@ -302,14 +323,15 @@ def calc_pc(model, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset
     res = -np.array(res)  # log p
     res = np.exp(res)  # p
     res = np.mean(res)  # pの平均
+    # print(np.log(res))
+    # print(np.log(n_possibles))
 
     return np.log(n_possibles) + np.log(res)
 
 if __name__ == '__main__':
-
     # データセット作成
     params_dataset = {
-        'n_nodes': 1000,
+        'n_nodes': 500,
         'n_dim': 30,
         'R': 10,
         'sigma': 1,
@@ -317,165 +339,88 @@ if __name__ == '__main__':
     }
 
     # パラメータ
-    burn_epochs = 50
+    burn_epochs = 10
     learning_rate = 10
-    burn_batch_size = 16
+    burn_batch_size = 32
     # SNML用
     snml_n_iter = 10
-    snml_learning_rate = 0.01
+    snml_learning_rate = 0.1
     snml_n_max_data = 500
     # それ以外
-    loader_workers = 16
+    loader_workers = 2
     shuffle = True
+    sparse = True
 
-    model_n_dims = [10,20,30,40,50]
+    model_n_dim = 30
 
     result = pd.DataFrame()
+    # 隣接行列
+    adj_mat = hyperbolic_geometric_graph(
+        n_nodes=params_dataset['n_nodes'],
+        n_dim=params_dataset['n_dim'],
+        R=params_dataset['R'],
+        sigma=params_dataset['sigma'],
+        T=params_dataset['T']
+    )
+    train, val = create_dataset(
+        adj_mat=adj_mat,
+        n_max_positives=2,
+        n_max_negatives=20,
+        val_size=0.02
+    )
 
-    for n_graph in range(10):  # データ5本で性能比較
-        print("n_graph:", n_graph)
-        # 隣接行列
-        adj_mat = hyperbolic_geometric_graph(
-            n_nodes=params_dataset['n_nodes'],
-            n_dim=params_dataset['n_dim'],
-            R=params_dataset['R'],
-            sigma=params_dataset['sigma'],
-            T=params_dataset['T']
-        )
-        train, val = create_dataset(
-            adj_mat=adj_mat,
-            n_max_positives=2,
-            n_max_negatives=10,
-            val_size=0.01
-        )
+    print(len(val))
 
-        print(len(val))
+    # 平均次数が少なくなるように手で調整する用
+    print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
-        # 平均次数が少なくなるように手で調整する用
-        print('average degree:', np.sum(adj_mat) / len(adj_mat))
+    u_adj_mat = get_unobserved(adj_mat, train)
 
-        u_adj_mat = get_unobserved(adj_mat, train)
+    print("model_n_dim:", model_n_dim)
+    # burn-inでの処理
+    dataloader = DataLoader(
+        Graph(train),
+        shuffle=shuffle,
+        batch_size=burn_batch_size,
+        num_workers=loader_workers,
+    )
 
-        for model_n_dim in model_n_dims:
-            print("model_n_dim:", model_n_dim)
-            # burn-inでの処理
-            dataloader = DataLoader(
-                Graph(train),
-                shuffle=shuffle,
-                batch_size=burn_batch_size,
-                num_workers=loader_workers,
-            )
+    # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
+    # 平均次数とかから逆算できる気がする。
+    model = Poincare(
+        n_nodes=params_dataset['n_nodes'],
+        n_dim=model_n_dim,  # モデルの次元
+        R=params_dataset['R'],
+        T=params_dataset['T'],
+        init_range=0.001,
+        sparse=sparse
+    )
+    # 最適化関数。
+    rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
+                R=params_dataset['R'])
 
-            # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
-            # 平均次数とかから逆算できる気がする。
-            model = Poincare(
-                n_nodes=params_dataset['n_nodes'],
-                n_dim=model_n_dim,  # モデルの次元
-                R=params_dataset['R'],
-                T=params_dataset['T'],
-                init_range=0.001
-            )
-            # 最適化関数。
-            rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
-                        R=params_dataset['R'])
+    loss_history = []
 
-            loss_history = []
+    for epoch in range(burn_epochs):
+        if epoch != 0 and epoch % 10 == 0:  # 10 epochごとに学習率を減少
+            rsgd.param_groups[0]["learning_rate"] /= 5
+        losses = []
+        for pairs, labels in dataloader:
+            rsgd.zero_grad()
+            # print(model(pairs, labels))
+            loss = model(pairs, labels).mean()
+            loss.backward()
+            rsgd.step()
+            losses.append(loss)
 
-            for epoch in range(burn_epochs):
-                if epoch != 0 and epoch % 10 == 0:  # 10 epochごとに学習率を減少
-                    rsgd.param_groups[0]["learning_rate"] /= 5
-                losses = []
-                for pairs, labels in dataloader:
-                    rsgd.zero_grad()
-                    # print(model(pairs, labels))
-                    loss = model(pairs, labels).mean()
-                    loss.backward()
-                    rsgd.step()
-                    losses.append(loss)
+        loss_history.append(torch.Tensor(losses).mean().item())
+        print("epoch:", epoch, ", loss:",
+              torch.Tensor(losses).mean().item())
 
-                loss_history.append(torch.Tensor(losses).mean().item())
-                print("epoch:", epoch, ", loss:",
-                      torch.Tensor(losses).mean().item())
-
-            # 以下ではmodelのみを流用する。
-            # snmlの計算処理
-            # こっちは1サンプルずつやる
-            dataloader_snml = DataLoader(
-                Graph(val),
-                shuffle=shuffle,
-                batch_size=1,
-                num_workers=0,
-            )
-
-            snml_codelength = 0
-            snml_codelength_history = []
-
-            for pair, label in dataloader_snml:
-
-                # parametric complexityのサンプリングによる計算
-                sampling_data = SamplingGraph(
-                    adj_mat=u_adj_mat,
-                    n_max_data=snml_n_max_data,
-                    positive_size=1 / 2  # 一様サンプリング以外は実装の修正が必要。
-                )
-                pairs, labels, n_possibles = sampling_data.get_all_data()
-
-                snml_pc = calc_pc(model, pairs, labels, n_possibles,
-                                  snml_n_iter, snml_learning_rate, params_dataset['R'], train)
-
-                # valのデータでの尤度
-                # uとvに関わるデータを5個ずつサンプリングする。
-                u = pair[0, 0].item()
-                v = pair[0, 1].item()
-                u_indice = np.union1d(np.where(train[:, 0] == u)[
-                                      0], np.where(train[:, 1] == u)[0])
-                u_indice = np.random.permutation(u_indice)[0:5]
-                v_indice = np.union1d(np.where(train[:, 0] == v)[
-                                      0], np.where(train[:, 1] == v)[0])
-                v_indice = np.random.permutation(v_indice)[0:5]
-
-                pair_ = torch.cat((pair, torch.Tensor(
-                    train[u_indice, 0:2]), torch.Tensor(train[v_indice, 0:2])), dim=0).long()
-                label_ = torch.cat((label.reshape(-1,1), torch.Tensor(train[u_indice, 2]).reshape(
-                    -1, 1), torch.Tensor(train[v_indice, 2]).reshape(-1, 1)), dim=0).long()
-
-                rsgd = RSGD(model.parameters(), learning_rate=snml_learning_rate,
-                            R=params_dataset['R'])
-                for _ in range(snml_n_iter):
-                    rsgd.zero_grad()
-                    loss = model(pair_, label_).mean()
-                    loss.backward()
-                    rsgd.step()
-
-                snml_codelength += model(pair, label).item() + snml_pc
-                print('snml_codelength:', snml_codelength)
-                # print('-log p:', loss.item())
-                # print('snml_pc:', snml_pc)
-
-                # valで使用したデータの削除
-                u_adj_mat[pair[0, 0], pair[0, 1]] = -1
-                u_adj_mat[pair[0, 1], pair[0, 0]] = -1
-
-                # データセットを更新する。
-                val_ = np.array([pair[0, 0], pair[0, 1], label[0]]).reshape((1, -1))
-                train = np.concatenate([train, val], axis=0)
-
-                snml_codelength_history.append(snml_codelength)
-
-            del dataloader
-            del dataloader_snml
-            gc.collect()
-
-            df_row = pd.DataFrame(
-                {"model_n_dim": [model_n_dim], "snml_codelength": snml_codelength_history[-1]})
-            result = pd.concat([result, df_row], axis=0)
-
-        del train
-        del val
-        del adj_mat
-        del u_adj_mat
-
-        gc.collect()
-
-
-        result.to_csv("result_" + str(n_graph) + ".csv", index=False)
+    # -2*log(p)の計算
+    basescore = 0
+    for pairs, labels in dataloader:
+        # print(model(pairs, labels))
+        loss = model(pairs, labels).sum().item()
+        basescore += 2 * loss
+    print(basescore)
