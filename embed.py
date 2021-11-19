@@ -20,6 +20,8 @@ from functools import partial
 from multiprocessing import Pool
 import pandas as pd
 import gc
+import time
+from torch import Tensor
 
 np.random.seed(0)
 
@@ -50,9 +52,10 @@ def create_dataset(
         # positiveをサンプリング
         idx_positives = np.where(_adj_mat[i, :] == 1)[0]
         idx_negatives = np.where(_adj_mat[i, :] == 0)[0]
-        n_positives = min(len(idx_positives), n_max_positives)
         idx_positives = np.random.permutation(idx_positives)
         idx_negatives = np.random.permutation(idx_negatives)
+        n_positives = min(len(idx_positives), n_max_positives)
+        n_negatives = min(len(idx_negatives), n_max_negatives)
 
         # node iを固定した上で、positiveなnode jを対象とする。それに対し、
         for j in idx_positives[0:n_positives]:
@@ -60,17 +63,10 @@ def create_dataset(
             _adj_mat[i, j] = -1
             _adj_mat[j, i] = -1
 
-        for _ in range(n_max_positives):
-
-            # 負例が不足した場合に備える。
-            n_negatives = min(len(idx_negatives), n_max_negatives)
-            for k in range(n_negatives):
-                data.append((i, idx_negatives[k], 0))
-                _adj_mat[i, k] = -1
-                _adj_mat[k, i] = -1
-
-            # サンプリングしたものを取り除く
-            idx_negatives = idx_negatives[n_negatives:]
+        for j in idx_negatives[0:n_negatives]:
+            data.append((i, j, 0))  # positive sample
+            _adj_mat[i, j] = -1
+            _adj_mat[j, i] = -1
 
     data = np.random.permutation(data)
 
@@ -118,6 +114,7 @@ class Graph(Dataset):
         data
     ):
         self.data = torch.Tensor(data).long()
+        # self.data = deepcopy(data)
         self.n_items = len(data)
 
     def __len__(self):
@@ -140,11 +137,12 @@ class SamplingGraph(Dataset):
         self.adj_mat = deepcopy(adj_mat)
         self.n_nodes = self.adj_mat.shape[0]
         for i in range(self.n_nodes):
-            for j in range(i + 1):
-                self.adj_mat[i, j] = -1
+            self.adj_mat[i, 0:i + 1] = -1
+        # print(self.adj_mat)
         # 今まで観測されていないデータからのみノードの組をサンプルをする。
         data_unobserved = np.array(np.where(self.adj_mat != -1)).T
         data_unobserved = np.random.permutation(data_unobserved)
+        # print(data_unobserved)
         n_data = min(n_max_data, len(data_unobserved))
         self.n_possibles = 2 * len(data_unobserved)
         data_sampled = data_unobserved[:n_data]
@@ -167,14 +165,6 @@ class SamplingGraph(Dataset):
 
     def get_all_data(self):
         return self.data[:, 0:2], self.data[:, 2], self.n_possibles
-
-
-# def projection(theta, R_e):
-#     # 多様体に入るようR_eの半径の円に押し込める。
-#     theta_norm = torch.norm(theta, dim=1)
-#     for i, norm in enumerate(theta_norm):
-#         if norm > R_e:
-#             theta[i] = (theta[i] * R_e) / norm
 
 
 class RSGD(optim.Optimizer):
@@ -223,13 +213,13 @@ class RSGD(optim.Optimizer):
 
 
 def e_dist_2(u_e, v_e):
-    return torch.sum((u_e - v_e)**2, axis=1)
+    return torch.sum((u_e - v_e)**2, dim=1)
 
 
 def h_dist(u_e, v_e):
-    ret = 1
-    ret += (2 * e_dist_2(u_e, v_e)) / \
-        ((1 - e_dist_2(0, u_e)) * (1 - e_dist_2(0, v_e)))
+    ret = 1.0
+    ret += (2.0 * e_dist_2(u_e, v_e)) / \
+        ((1.0 - e_dist_2(0.0, u_e)) * (1.0 - e_dist_2(0.0, v_e)))
     return arcosh(ret)
 
 
@@ -266,10 +256,30 @@ class Poincare(nn.Module):
         loss = torch.clone(labels).float()
         loss = torch.where(loss == 1, torch.log(torch.exp(
             (dist - self.R) / self.T) + 1), torch.log(1 + 1 / torch.exp((dist - self.R) / self.T)))
+
         return loss
 
     def get_poincare_table(self):
         return self.table.weight.data.numpy()
+
+
+def sampling_related_nodes(pair, label, dataset, n_samples=5):
+    # uとvに関わるデータを5個ずつサンプリングする。
+    # n_samplesが大きすぎるとエラーが出る可能性がある。
+    u=pair[0, 0].item()
+    v=pair[0, 1].item()
+    u_indice = np.union1d(np.where(dataset[:, 0] == u)[
+                          0], np.where(dataset[:, 1] == u)[0])
+    u_indice = np.random.choice(u_indice, size=n_samples, replace=False)
+    v_indice = np.union1d(np.where(dataset[:, 0] == v)[
+                          0], np.where(dataset[:, 1] == v)[0])
+    v_indice = np.random.choice(v_indice, size=n_samples, replace=False)
+
+    pair_ = torch.cat((pair, torch.Tensor(
+        dataset[u_indice, 0:2]), torch.Tensor(dataset[v_indice, 0:2])), dim=0).long()
+    label_ = torch.cat((label.reshape((-1, 1)), torch.Tensor(dataset[
+                       u_indice, 2].reshape((-1, 1))), torch.Tensor(dataset[v_indice, 2].reshape((-1, 1))))).long()
+    return pair_, label_
 
 
 def _mle(idx, model, pairs, labels, n_iter, learning_rate, R, dataset):
@@ -278,22 +288,10 @@ def _mle(idx, model, pairs, labels, n_iter, learning_rate, R, dataset):
     rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
                 R=R)
     pair = pairs[idx].reshape((1, -1))
-    label = labels[idx].reshape((1, -1))
+    label = labels[idx]
 
     # uとvに関わるデータを5個ずつサンプリングする。
-    u = pair[0, 0].item()
-    v = pair[0, 1].item()
-    u_indice = np.union1d(np.where(dataset[:, 0] == u)[
-                          0], np.where(dataset[:, 1] == u)[0])
-    u_indice = np.random.permutation(u_indice)[0:5]
-    v_indice = np.union1d(np.where(dataset[:, 0] == v)[
-                          0], np.where(dataset[:, 1] == v)[0])
-    v_indice = np.random.permutation(v_indice)[0:5]
-
-    pair_ = torch.cat((pair, torch.Tensor(
-        dataset[u_indice, 0:2]), torch.Tensor(dataset[v_indice, 0:2])), dim=0).long()
-    label_ = torch.cat((label, torch.Tensor(dataset[
-                       u_indice, 2].reshape(-1, 1)), torch.Tensor(dataset[v_indice, 2]).reshape(-1, 1)), dim=0).long()
+    pair_, label_ = sampling_related_nodes(pair, label, dataset)
 
     for _ in range(n_iter):
         rsgd.zero_grad()
@@ -307,7 +305,7 @@ def _mle(idx, model, pairs, labels, n_iter, learning_rate, R, dataset):
     return model(pair, label).item()
 
 
-def calc_pc(model, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
+def calc_lik_pc_cpu(model, val_pair, val_label, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
     # parametric complexityをサンプリングで計算する補助関数。
     n_samples = len(labels)
 
@@ -323,15 +321,63 @@ def calc_pc(model, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset
     res = -np.array(res)  # log p
     res = np.exp(res)  # p
     res = np.mean(res)  # pの平均
-    # print(np.log(res))
-    # print(np.log(n_possibles))
 
-    return np.log(n_possibles) + np.log(res)
+    # validationデータの尤度計算
+    val_pair_, val_label_ = sampling_related_nodes(val_pair, val_label, dataset)
+
+    rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
+                R=R)
+    for _ in range(n_iter):
+        rsgd.zero_grad()
+        loss = model(val_pair_, val_label_).mean()
+        loss.backward()
+        rsgd.step()
+
+    with torch.no_grad():
+        lik = model(val_pair, val_label).item()
+
+    return lik, np.log(n_possibles) + np.log(res)
+
+
+def _create_subdata(idx, pairs, labels, dataset):
+    pair = pairs[idx].reshape((1, -1))
+    label = labels[idx]
+    pair_, label_=sampling_related_nodes(pair, label, dataset)
+
+    return pair_, label_
+
+
+def calc_pc_gpu(model, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
+    # parametric complexityをサンプリングで計算する補助関数。
+    n_samples = len(labels)
+
+    create_subdata = partial(_create_subdata, pairs=pairs,
+                             labels=labels, dataset=dataset)
+
+    ctx = multi.get_context('spawn')  # pytorchを使うときはこれを使わないとダメらしい。
+    p = ctx.Pool(multi.cpu_count() - 1)
+    args = list(range(n_samples))
+    res = p.map(create_subdata, args)
+    p.close()
+
+    ret_loss = []
+
+    print(res)
+    print(res[0])
+    print(res[1])
+
+    # resは-log p
+    ret_loss = -np.array(ret_loss)  # log p
+    ret_loss = np.exp(ret_loss)  # p
+    ret_loss = np.mean(ret_loss)  # pの平均
+
+    return np.log(n_possibles) + np.log(ret_loss)
+
 
 if __name__ == '__main__':
     # データセット作成
     params_dataset = {
-        'n_nodes': 500,
+        'n_nodes': 1000,
         'n_dim': 30,
         'R': 10,
         'sigma': 1,
@@ -340,14 +386,15 @@ if __name__ == '__main__':
 
     # パラメータ
     burn_epochs = 10
-    learning_rate = 10
-    burn_batch_size = 32
+    burn_batch_size = 256
+    learning_rate = 10.0 * burn_batch_size / 32  # batchサイズに対応して学習率変更
     # SNML用
     snml_n_iter = 10
     snml_learning_rate = 0.1
     snml_n_max_data = 500
     # それ以外
-    loader_workers = 2
+    loader_workers = 16
+    print("loader_workers: ", loader_workers)
     shuffle = True
     sparse = True
 
@@ -364,7 +411,7 @@ if __name__ == '__main__':
     )
     train, val = create_dataset(
         adj_mat=adj_mat,
-        n_max_positives=2,
+        n_max_positives=5,
         n_max_negatives=20,
         val_size=0.02
     )
@@ -383,6 +430,7 @@ if __name__ == '__main__':
         shuffle=shuffle,
         batch_size=burn_batch_size,
         num_workers=loader_workers,
+        pin_memory=True
     )
 
     # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
@@ -399,13 +447,25 @@ if __name__ == '__main__':
     rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
                 R=params_dataset['R'])
 
+    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # device="cpu"
+    device = "cuda:0"
+    model.to(device)
+    # model=nn.DataParallel(model, device_ids=[0, 1, 2, 3])
+
     loss_history = []
+
+    start = time.time()
 
     for epoch in range(burn_epochs):
         if epoch != 0 and epoch % 10 == 0:  # 10 epochごとに学習率を減少
             rsgd.param_groups[0]["learning_rate"] /= 5
         losses = []
         for pairs, labels in dataloader:
+
+            pairs = pairs.to(device)
+            labels = labels.to(device)
+
             rsgd.zero_grad()
             # print(model(pairs, labels))
             loss = model(pairs, labels).mean()
@@ -417,10 +477,17 @@ if __name__ == '__main__':
         print("epoch:", epoch, ", loss:",
               torch.Tensor(losses).mean().item())
 
+    elapsed_time = time.time() - start
+    print("elapsed_time:{0}".format(elapsed_time) + "[sec]")
+
     # -2*log(p)の計算
     basescore = 0
     for pairs, labels in dataloader:
         # print(model(pairs, labels))
+        pairs = pairs.to(device)
+        labels = labels.to(device)
+
         loss = model(pairs, labels).sum().item()
         basescore += 2 * loss
+
     print(basescore)
