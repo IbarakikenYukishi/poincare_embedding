@@ -1,7 +1,6 @@
 import numpy as np
 from scipy import integrate
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 np.random.seed(0)
 
