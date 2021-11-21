@@ -9,12 +9,12 @@ import time
 from copy import deepcopy
 from torch.utils.data import DataLoader
 from datasets import hyperbolic_geometric_graph
-from embed import create_dataset, get_unobserved, Graph, SamplingGraph, RSGD, Poincare, calc_lik_pc_cpu
+from embed import create_dataset, get_unobserved, Graph, SamplingGraph, RSGD, Poincare, calc_lik_pc_cpu, calc_lik_pc_gpu
 
 if __name__ == '__main__':
     # データセット作成
     params_dataset = {
-        'n_nodes': 1000,
+        'n_nodes': 10000,
         'n_dim': 32,
         'R': 10,
         'sigma': 1,
@@ -22,12 +22,12 @@ if __name__ == '__main__':
     }
 
     # パラメータ
-    burn_epochs = 10
+    burn_epochs = 50
     burn_batch_size = 1024
-    learning_rate = 10.0*burn_batch_size/32  # batchサイズに対応して学習率変更
+    learning_rate = 10.0 * burn_batch_size / 32  # batchサイズに対応して学習率変更
     # SNML用
     snml_n_iter = 10
-    snml_learning_rate = 0.1
+    snml_learning_rate = 1
     snml_n_max_data = 500
     # それ以外
     loader_workers = 16
@@ -36,7 +36,6 @@ if __name__ == '__main__':
     sparse = True
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     n_graphs = 1
-
 
     model_n_dims = [2, 4, 8, 16, 32, 64, 128, 256]
 
@@ -53,9 +52,9 @@ if __name__ == '__main__':
         )
         train, val = create_dataset(
             adj_mat=adj_mat,
-            n_max_positives=10,
-            n_max_negatives=100,
-            val_size=0.00002
+            n_max_positives=3,
+            n_max_negatives=30,
+            val_size=0.00003
         )
 
         # 平均次数が少なくなるように手で調整する用
@@ -67,7 +66,6 @@ if __name__ == '__main__':
         print('# of data in val:', len(val))
 
         print("start burn-in")
-
 
         for model_n_dim in model_n_dims:
             train_ = deepcopy(train)
@@ -166,8 +164,11 @@ if __name__ == '__main__':
                 pairs, labels, n_possibles = sampling_data.get_all_data()
                 print("n_possibles:", n_possibles)
 
-                lik, snml_pc = calc_lik_pc_cpu(model, val_pair, val_label, pairs, labels, n_possibles,
-                                  snml_n_iter, snml_learning_rate, params_dataset['R'], train_)
+                # lik, snml_pc = calc_lik_pc_cpu(model, val_pair, val_label, pairs, labels, n_possibles,
+                # snml_n_iter, snml_learning_rate, params_dataset['R'], train_)
+
+                lik, snml_pc = calc_lik_pc_gpu(model, val_pair, val_label, pairs, labels, n_possibles,
+                                               snml_n_iter, snml_learning_rate, params_dataset['R'], train_)
 
                 basescore += 2 * lik
                 snml_codelength += lik + snml_pc

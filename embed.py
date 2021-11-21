@@ -15,9 +15,8 @@ from tensorboardX import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
 from datasets import hyperbolic_geometric_graph, connection_prob
 from copy import deepcopy
-import multiprocessing as multi
+import torch.multiprocessing as multi
 from functools import partial
-from multiprocessing import Pool
 import pandas as pd
 import gc
 import time
@@ -143,7 +142,8 @@ class SamplingGraph(Dataset):
         data_unobserved = np.array(np.where(self.adj_mat != -1)).T
         n_data = min(n_max_data, len(data_unobserved))
         self.n_possibles = 2 * len(data_unobserved)
-        data_sampled = np.random.choice(np.arange(len(data_unobserved)), size=n_data, replace=False)
+        data_sampled = np.random.choice(
+            np.arange(len(data_unobserved)), size=n_data, replace=False)
         data_sampled = data_unobserved[data_sampled, :]
         # ラベルを人工的に作成する。
         labels = np.zeros(n_data)
@@ -284,29 +284,6 @@ def sampling_related_nodes(pair, label, dataset, n_samples=5):
     return pair_, label_
 
 
-# def _mle(idx, model, n_iter, learning_rate, R, sub_dataset):
-#     # あるデータの尤度を計算する補助関数。
-#     _model = deepcopy(model)
-#     rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
-#                 R=R)
-#     # pair = pairs[idx].reshape((1, -1))
-#     # label = labels[idx]
-
-#     # uとvに関わるデータを5個ずつサンプリングする。
-#     pair_ = sub_dataset[idx][0]
-#     label_ = sub_dataset[idx][1]
-
-#     for _ in range(n_iter):
-#         rsgd.zero_grad()
-#         loss = model(pair_, label_).mean()
-#         loss.backward()
-#         rsgd.step()
-
-#     del pair_
-#     del label_
-
-#     return model(pair, label).item()
-
 def _mle(idx, model, pairs, labels, n_iter, learning_rate, R, dataset):
     print(idx)
     # あるデータの尤度を計算する補助関数。
@@ -360,6 +337,11 @@ def calc_lik_pc_cpu(model, val_pair, val_label, pairs, labels, n_possibles, n_it
 
 
 def calc_lik_pc_gpu(model, val_pair, val_label, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
+    # multiprocessingが動かないのでおまじない。
+    import resource
+    rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
+
     # parametric complexityをサンプリングで計算する補助関数。
     n_samples = len(labels)
 
@@ -373,37 +355,25 @@ def calc_lik_pc_gpu(model, val_pair, val_label, pairs, labels, n_possibles, n_it
     create_sub_dataset = partial(_create_sub_dataset, pairs=pairs_,
                                  labels=labels_, dataset=dataset)
 
-    import resource
-    rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
-
-    # pytorchを使うときはこれを使わないとダメらしい。
+    # pytorchを使用するときはspawnを指定
     with multi.get_context('spawn').Pool(multi.cpu_count() - 1) as p:
         args = list(range(n_samples))
         sub_dataset = p.map(create_sub_dataset, args)
 
-    for sub_datum in sub_dataset:
-        # モデルとoptimizer
-        model_ = deepcopy(model)
-        model_.to("cuda:0")
-        rsgd = RSGD(model_.parameters(), learning_rate=learning_rate,
-                    R=R)
-        # データの組を準備
-        pair_ = sub_datum[0]
-        label_ = sub_datum[1]
-        pair_ = pair_.to("cuda:0")
-        label_ = label_.to("cuda:0")
-        for _ in range(n_iter):
-            rsgd.zero_grad()
-            loss = model_(pair_, label_).mean()
-            loss.backward()
-            rsgd.step()
+    sub_dataset = torch.stack(sub_dataset, dim=0)
 
-        res.append(model_(pair_[0].reshape((1, -1)), label_[0]).item())
+    # print(sub_dataset.shape)
 
-        del pair_
-        del label_
-        del model_
+    mle_gpu = partial(_mle_gpu, n_div=4, model=model, sub_dataset=sub_dataset,
+                      n_iter=n_iter, learning_rate=learning_rate, R=R)
+
+    multi.set_sharing_strategy('file_system')
+
+    with multi.get_context('spawn').Pool(4) as p:
+        args = list(range(4))
+        res = p.map(mle_gpu, args)
+
+    res = np.array(res).reshape(-1)
 
     # resは-log p
     lik = res[0]
@@ -417,98 +387,52 @@ def calc_lik_pc_gpu(model, val_pair, val_label, pairs, labels, n_possibles, n_it
     return lik, np.log(n_possibles) + np.log(res)
 
 
+def _mle_gpu(idx, model, n_div, sub_dataset, n_iter, learning_rate, R):
+    device = "cuda:" + str(idx)
+
+    n_samples = len(sub_dataset)
+    # gpuの個数で割ったデータ分だけ切り出し、GPUに送る。
+    _sub_dataset = sub_dataset[
+        int(n_samples * idx / n_div): int(n_samples * (idx + 1) / n_div)]
+    _sub_dataset = _sub_dataset.to(device)
+
+    #　返り値
+    res = []
+
+    for datum in _sub_dataset:
+        pair_ = datum[:, 0:2]
+        label_ = datum[:, 2]
+        # モデルとoptimizer
+        model_ = deepcopy(model)
+        model_.to(device)
+        rsgd = RSGD(model_.parameters(), learning_rate=learning_rate,
+                    R=R)
+        # データの組を準備
+        for _ in range(n_iter):
+            rsgd.zero_grad()
+            loss = model_(pair_, label_).mean()
+            loss.backward()
+            rsgd.step()
+
+        res.append(model_(pair_[0].reshape((1, -1)), label_[0]).item())
+
+        del pair_
+        del label_
+        del model_
+
+    return res
+
+
 def _create_sub_dataset(idx, pairs, labels, dataset):
     pair = pairs[idx].reshape((1, -1))
     label = labels[idx]
     # uとvに関わるデータを5個ずつサンプリングする。
     pair_, label_ = sampling_related_nodes(pair, label, dataset)
 
-    # print(idx)
-    # print(pair_, label_)
+    # tripletにして返す。
+    triplets = torch.cat([pair_, label_], dim=1)
 
-    return pair_, label_
-
-# def calc_lik_pc_cpu(model, val_pair, val_label, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
-#     # parametric complexityをサンプリングで計算する補助関数。
-#     n_samples = len(labels)
-
-#     print("subdataset creation")
-#     print(n_samples)
-
-#     # データ作成
-#     create_sub_dataset = partial(_create_sub_dataset, pairs=pairs,
-#                              labels=labels, dataset=dataset)
-
-#     # torch.multiprocessing.set_sharing_strategy('file_system')
-#     # import resource
-#     # rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-#     # resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
-
-
-#     ctx = multi.get_context('spawn')  # pytorchを使うときはこれを使わないとダメらしい。
-#     with ctx.Pool(4) as p:
-#         args = list(range(n_samples))
-#         sub_dataset = p.map(create_sub_dataset, args)
-
-#     print(len(sub_dataset))
-#     gc.collect()
-
-#     mle = partial(_mle, model=model, n_iter=n_iter, learning_rate=learning_rate, R=R, sub_dataset=sub_dataset)
-
-#     # mle = partial(_mle, model=model, pairs=pairs, labels=labels,
-#     #               n_iter=n_iter, learning_rate=learning_rate, R=R, dataset=dataset)
-
-#     ctx = multi.get_context('spawn')  # pytorchを使うときはこれを使わないとダメらしい。
-#     with ctx.Pool(4) as p:
-#         args = list(range(n_samples))
-#         res = p.map(mle, args)
-#     # resは-log p
-#     res = -np.array(res)  # log p
-#     res = np.exp(res)  # p
-#     res = np.mean(res)  # pの平均
-
-#     # validationデータの尤度計算
-#     val_pair_, val_label_ = sampling_related_nodes(val_pair, val_label, dataset)
-
-#     rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
-#                 R=R)
-#     for _ in range(n_iter):
-#         rsgd.zero_grad()
-#         loss = model(val_pair_, val_label_).mean()
-#         loss.backward()
-#         rsgd.step()
-
-#     with torch.no_grad():
-#         lik = model(val_pair, val_label).item()
-
-#     return lik, np.log(n_possibles) + np.log(res)
-
-
-def calc_pc_gpu(model, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
-    # parametric complexityをサンプリングで計算する補助関数。
-    n_samples = len(labels)
-
-    create_subdata = partial(_create_subdata, pairs=pairs,
-                             labels=labels, dataset=dataset)
-
-    ctx = multi.get_context('spawn')  # pytorchを使うときはこれを使わないとダメらしい。
-    p = ctx.Pool(multi.cpu_count() - 1)
-    args = list(range(n_samples))
-    res = p.map(create_subdata, args)
-    p.close()
-
-    ret_loss = []
-
-    print(res)
-    print(res[0])
-    print(res[1])
-
-    # resは-log p
-    ret_loss = -np.array(ret_loss)  # log p
-    ret_loss = np.exp(ret_loss)  # p
-    ret_loss = np.mean(ret_loss)  # pの平均
-
-    return np.log(n_possibles) + np.log(ret_loss)
+    return triplets
 
 
 if __name__ == '__main__':
