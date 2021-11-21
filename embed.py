@@ -141,11 +141,10 @@ class SamplingGraph(Dataset):
         # print(self.adj_mat)
         # 今まで観測されていないデータからのみノードの組をサンプルをする。
         data_unobserved = np.array(np.where(self.adj_mat != -1)).T
-        data_unobserved = np.random.permutation(data_unobserved)
-        # print(data_unobserved)
         n_data = min(n_max_data, len(data_unobserved))
         self.n_possibles = 2 * len(data_unobserved)
-        data_sampled = data_unobserved[:n_data]
+        data_sampled = np.random.choice(np.arange(len(data_unobserved)), size=n_data, replace=False)
+        data_sampled = data_unobserved[data_sampled, :]
         # ラベルを人工的に作成する。
         labels = np.zeros(n_data)
         labels[0:int(n_data * positive_size)] = 1
@@ -266,8 +265,8 @@ class Poincare(nn.Module):
 def sampling_related_nodes(pair, label, dataset, n_samples=5):
     # uとvに関わるデータを5個ずつサンプリングする。
     # n_samplesが大きすぎるとエラーが出る可能性がある。
-    u=pair[0, 0].item()
-    v=pair[0, 1].item()
+    u = pair[0, 0].item()
+    v = pair[0, 1].item()
     u_indice = np.union1d(np.where(dataset[:, 0] == u)[
                           0], np.where(dataset[:, 1] == u)[0])
     u_indice = np.random.choice(u_indice, size=n_samples, replace=False)
@@ -279,10 +278,37 @@ def sampling_related_nodes(pair, label, dataset, n_samples=5):
         dataset[u_indice, 0:2]), torch.Tensor(dataset[v_indice, 0:2])), dim=0).long()
     label_ = torch.cat((label.reshape((-1, 1)), torch.Tensor(dataset[
                        u_indice, 2].reshape((-1, 1))), torch.Tensor(dataset[v_indice, 2].reshape((-1, 1))))).long()
+
+    del u_indice, v_indice
+
     return pair_, label_
 
 
+# def _mle(idx, model, n_iter, learning_rate, R, sub_dataset):
+#     # あるデータの尤度を計算する補助関数。
+#     _model = deepcopy(model)
+#     rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
+#                 R=R)
+#     # pair = pairs[idx].reshape((1, -1))
+#     # label = labels[idx]
+
+#     # uとvに関わるデータを5個ずつサンプリングする。
+#     pair_ = sub_dataset[idx][0]
+#     label_ = sub_dataset[idx][1]
+
+#     for _ in range(n_iter):
+#         rsgd.zero_grad()
+#         loss = model(pair_, label_).mean()
+#         loss.backward()
+#         rsgd.step()
+
+#     del pair_
+#     del label_
+
+#     return model(pair, label).item()
+
 def _mle(idx, model, pairs, labels, n_iter, learning_rate, R, dataset):
+    print(idx)
     # あるデータの尤度を計算する補助関数。
     _model = deepcopy(model)
     rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
@@ -309,42 +335,153 @@ def calc_lik_pc_cpu(model, val_pair, val_label, pairs, labels, n_possibles, n_it
     # parametric complexityをサンプリングで計算する補助関数。
     n_samples = len(labels)
 
-    mle = partial(_mle, model=model, pairs=pairs, labels=labels,
+    # 0番目のデータにvalidationをおいておく。
+    pairs_ = torch.cat((val_pair, pairs), dim=0)
+    labels_ = torch.cat((val_label.reshape((-1, 1)),
+                         labels.reshape((-1, 1))), dim=0)
+
+    mle = partial(_mle, model=model, pairs=pairs_, labels=labels_,
                   n_iter=n_iter, learning_rate=learning_rate, R=R, dataset=dataset)
 
-    ctx = multi.get_context('spawn')  # pytorchを使うときはこれを使わないとダメらしい。
-    p = ctx.Pool(multi.cpu_count() - 1)
-    args = list(range(n_samples))
-    res = p.map(mle, args)
-    p.close()
+    # pytorchを使うときはこれを使わないとダメらしい。
+    with multi.get_context('spawn').Pool(multi.cpu_count() - 1) as p:
+        args = list(range(n_samples + 1))
+        res = p.map(mle, args)
     # resは-log p
-    res = -np.array(res)  # log p
-    res = np.exp(res)  # p
-    res = np.mean(res)  # pの平均
+    lik = res[0]
+    res = -np.array(res[1:])  # log p
+    res = np.exp(res[1:])  # p
+    res = np.mean(res[1:])  # pの平均
 
-    # validationデータの尤度計算
-    val_pair_, val_label_ = sampling_related_nodes(val_pair, val_label, dataset)
-
-    rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
-                R=R)
-    for _ in range(n_iter):
-        rsgd.zero_grad()
-        loss = model(val_pair_, val_label_).mean()
-        loss.backward()
-        rsgd.step()
-
-    with torch.no_grad():
-        lik = model(val_pair, val_label).item()
+    del pairs_
+    del labels_
 
     return lik, np.log(n_possibles) + np.log(res)
 
 
-def _create_subdata(idx, pairs, labels, dataset):
+def calc_lik_pc_gpu(model, val_pair, val_label, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
+    # parametric complexityをサンプリングで計算する補助関数。
+    n_samples = len(labels)
+
+    # 0番目のデータにvalidationをおいておく。
+    pairs_ = torch.cat((val_pair, pairs), dim=0)
+    labels_ = torch.cat((val_label.reshape((-1, 1)),
+                         labels.reshape((-1, 1))), dim=0)
+
+    res = []
+
+    create_sub_dataset = partial(_create_sub_dataset, pairs=pairs_,
+                                 labels=labels_, dataset=dataset)
+
+    import resource
+    rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
+
+    # pytorchを使うときはこれを使わないとダメらしい。
+    with multi.get_context('spawn').Pool(multi.cpu_count() - 1) as p:
+        args = list(range(n_samples))
+        sub_dataset = p.map(create_sub_dataset, args)
+
+    for sub_datum in sub_dataset:
+        # モデルとoptimizer
+        model_ = deepcopy(model)
+        model_.to("cuda:0")
+        rsgd = RSGD(model_.parameters(), learning_rate=learning_rate,
+                    R=R)
+        # データの組を準備
+        pair_ = sub_datum[0]
+        label_ = sub_datum[1]
+        pair_ = pair_.to("cuda:0")
+        label_ = label_.to("cuda:0")
+        for _ in range(n_iter):
+            rsgd.zero_grad()
+            loss = model_(pair_, label_).mean()
+            loss.backward()
+            rsgd.step()
+
+        res.append(model_(pair_[0].reshape((1, -1)), label_[0]).item())
+
+        del pair_
+        del label_
+        del model_
+
+    # resは-log p
+    lik = res[0]
+    res = -np.array(res[1:])  # log p
+    res = np.exp(res[1:])  # p
+    res = np.mean(res[1:])  # pの平均
+
+    del pairs_
+    del labels_
+
+    return lik, np.log(n_possibles) + np.log(res)
+
+
+def _create_sub_dataset(idx, pairs, labels, dataset):
     pair = pairs[idx].reshape((1, -1))
     label = labels[idx]
-    pair_, label_=sampling_related_nodes(pair, label, dataset)
+    # uとvに関わるデータを5個ずつサンプリングする。
+    pair_, label_ = sampling_related_nodes(pair, label, dataset)
+
+    # print(idx)
+    # print(pair_, label_)
 
     return pair_, label_
+
+# def calc_lik_pc_cpu(model, val_pair, val_label, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
+#     # parametric complexityをサンプリングで計算する補助関数。
+#     n_samples = len(labels)
+
+#     print("subdataset creation")
+#     print(n_samples)
+
+#     # データ作成
+#     create_sub_dataset = partial(_create_sub_dataset, pairs=pairs,
+#                              labels=labels, dataset=dataset)
+
+#     # torch.multiprocessing.set_sharing_strategy('file_system')
+#     # import resource
+#     # rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+#     # resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
+
+
+#     ctx = multi.get_context('spawn')  # pytorchを使うときはこれを使わないとダメらしい。
+#     with ctx.Pool(4) as p:
+#         args = list(range(n_samples))
+#         sub_dataset = p.map(create_sub_dataset, args)
+
+#     print(len(sub_dataset))
+#     gc.collect()
+
+#     mle = partial(_mle, model=model, n_iter=n_iter, learning_rate=learning_rate, R=R, sub_dataset=sub_dataset)
+
+#     # mle = partial(_mle, model=model, pairs=pairs, labels=labels,
+#     #               n_iter=n_iter, learning_rate=learning_rate, R=R, dataset=dataset)
+
+#     ctx = multi.get_context('spawn')  # pytorchを使うときはこれを使わないとダメらしい。
+#     with ctx.Pool(4) as p:
+#         args = list(range(n_samples))
+#         res = p.map(mle, args)
+#     # resは-log p
+#     res = -np.array(res)  # log p
+#     res = np.exp(res)  # p
+#     res = np.mean(res)  # pの平均
+
+#     # validationデータの尤度計算
+#     val_pair_, val_label_ = sampling_related_nodes(val_pair, val_label, dataset)
+
+#     rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
+#                 R=R)
+#     for _ in range(n_iter):
+#         rsgd.zero_grad()
+#         loss = model(val_pair_, val_label_).mean()
+#         loss.backward()
+#         rsgd.step()
+
+#     with torch.no_grad():
+#         lik = model(val_pair, val_label).item()
+
+#     return lik, np.log(n_possibles) + np.log(res)
 
 
 def calc_pc_gpu(model, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
