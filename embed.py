@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import datetime
 from tensorboardX import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
-from datasets import hyperbolic_geometric_graph, connection_prob
+from datasets import hyperbolic_geometric_graph, connection_prob, create_dataset
 from copy import deepcopy
 import torch.multiprocessing as multi
 from functools import partial
@@ -24,54 +24,16 @@ from torch import Tensor
 
 np.random.seed(0)
 
-# narrow: 次元を指定し、指定した長さのデータを切り取る
-# clamp: 最大値と最小値で抑える関数
+import matplotlib
+
+matplotlib.use("Agg")  # this needs to come before other matplotlib imports
+import matplotlib.pyplot as plt
+
+plt.style.use("ggplot")
 
 
 def arcosh(x):
     return torch.log(x + torch.sqrt(x ** 2 - 1))
-
-
-def create_dataset(
-    adj_mat,
-    n_max_positives=2,
-    n_max_negatives=10,
-    val_size=0.1
-):
-    # データセットを作成し、trainとvalidationに分ける
-    _adj_mat = deepcopy(adj_mat)
-    n_nodes = _adj_mat.shape[0]
-    for i in range(n_nodes):
-        _adj_mat[i, i] = -1
-    # -1はサンプリング済みの箇所か対角要素
-
-    data = []
-
-    for i in range(n_nodes):
-        # positiveをサンプリング
-        idx_positives = np.where(_adj_mat[i, :] == 1)[0]
-        idx_negatives = np.where(_adj_mat[i, :] == 0)[0]
-        idx_positives = np.random.permutation(idx_positives)
-        idx_negatives = np.random.permutation(idx_negatives)
-        n_positives = min(len(idx_positives), n_max_positives)
-        n_negatives = min(len(idx_negatives), n_max_negatives)
-
-        # node iを固定した上で、positiveなnode jを対象とする。それに対し、
-        for j in idx_positives[0:n_positives]:
-            data.append((i, j, 1))  # positive sample
-            _adj_mat[i, j] = -1
-            _adj_mat[j, i] = -1
-
-        for j in idx_negatives[0:n_negatives]:
-            data.append((i, j, 0))  # positive sample
-            _adj_mat[i, j] = -1
-            _adj_mat[j, i] = -1
-
-    data = np.random.permutation(data)
-
-    train = data[0:int(len(data) * (1 - val_size))]
-    val = data[int(len(data) * (1 - val_size)):]
-    return train, val
 
 
 def create_prob_matrix(x_e, n_nodes, R, T):
@@ -113,7 +75,6 @@ class Graph(Dataset):
         data
     ):
         self.data = torch.Tensor(data).long()
-        # self.data = deepcopy(data)
         self.n_items = len(data)
 
     def __len__(self):
@@ -231,7 +192,7 @@ class Poincare(nn.Module):
         R,
         T,
         init_range=0.001,
-        sparse=True
+        sparse=True,
     ):
         super().__init__()
         self.n_nodes = n_nodes
@@ -259,8 +220,56 @@ class Poincare(nn.Module):
         return loss
 
     def get_poincare_table(self):
-        return self.table.weight.data.numpy()
+        return self.table.weight.data.cpu().numpy()
 
+
+# class Poincare_latent(nn.Module):
+
+#     def __init__(
+#         self,
+#         n_nodes,
+#         n_dim,
+#         R,
+#         T,
+#         sigma=1,
+#         init_range=0.001,
+#         sparse=True,
+#     ):
+#         super().__init__()
+#         self.n_nodes = n_nodes
+#         self.n_dim = n_dim
+#         self.T = T
+#         self.R = R
+#         self.table = nn.Embedding(n_nodes, n_dim, sparse=sparse)
+
+#         numerator = lambda r: (
+#             (np.exp(sigma * (r - R)) - np.exp(-sigma * (r + R))))**(n_dim - 1)
+#         self.log_Cd=np.log(integrate.quad(numerator, 0, R)[0])+(n_dim-1)*(np.log(2)-R)
+
+
+#         nn.init.uniform_(self.table.weight, -init_range, init_range)
+
+#     def forward(
+#         self,
+#         pairs,
+#         labels
+#     ):
+#         # 座標を取得
+#         us = self.table(pairs[:, 0])
+#         vs = self.table(pairs[:, 1])
+
+#         # ロス計算
+#         dist = h_dist(us, vs)
+#         loss = torch.clone(labels).float()
+#         loss = torch.where(loss == 1, torch.log(torch.exp(
+#             (dist - self.R) / self.T) + 1), torch.log(1 + 1 / torch.exp((dist - self.R) / self.T)))
+
+#         return loss
+
+#     def get_poincare_table(self):
+#         return self.table.weight.data.numpy()
+
+#     def get_embedding_lik(self):
 
 def sampling_related_nodes(pair, label, dataset, n_samples=5):
     # uとvに関わるデータを5個ずつサンプリングする。
@@ -434,36 +443,69 @@ def _create_sub_dataset(idx, pairs, labels, dataset):
 
     return triplets
 
+def plot_figure(adj_mat, table, path):
+    # table = net.get_poincare_table()
+    # skip padding. plot x y
+
+    print(table.shape)
+
+    plt.figure(figsize=(7, 7))
+
+    _adj_mat=deepcopy(adj_mat)
+    for i in range(len(_adj_mat)):
+        _adj_mat[i, 0:i + 1] = -1
+
+    edges=np.array(np.where(_adj_mat==1)).T
+
+    # print(edges)
+    # print(table)
+
+    for edge in edges:
+        # print(edge)
+        # print(table[edge[0]])
+        # print(table[edge[1]])
+        plt.plot(
+            table[edge, 0],
+            table[edge, 1],
+            color="black",
+            # marker="o",
+            alpha=0.5,
+        )
+    plt.scatter(table[:, 0], table[:, 1])
+
+    # plt.title(path)
+    plt.gca().set_xlim(-1, 1)
+    plt.gca().set_ylim(-1, 1)
+    plt.gca().add_artist(plt.Circle((0, 0), 1, fill=False, edgecolor="black"))
+    plt.savefig(path)
+    plt.close()
 
 if __name__ == '__main__':
     # データセット作成
     params_dataset = {
-        'n_nodes': 1000,
-        'n_dim': 30,
+        'n_nodes': 128,
+        'n_dim': 2,
         'R': 10,
         'sigma': 1,
-        'T': 2
+        'T': 2 # Tが小さすぎると最適化のときにinfが増えてバグる。
     }
 
+
     # パラメータ
-    burn_epochs = 10
+    burn_epochs = 50
     burn_batch_size = 256
     learning_rate = 10.0 * burn_batch_size / 32  # batchサイズに対応して学習率変更
-    # SNML用
-    snml_n_iter = 10
-    snml_learning_rate = 0.1
-    snml_n_max_data = 500
     # それ以外
     loader_workers = 16
     print("loader_workers: ", loader_workers)
     shuffle = True
     sparse = True
 
-    model_n_dim = 30
+    model_n_dim = 2
 
     result = pd.DataFrame()
     # 隣接行列
-    adj_mat = hyperbolic_geometric_graph(
+    adj_mat, x_e = hyperbolic_geometric_graph(
         n_nodes=params_dataset['n_nodes'],
         n_dim=params_dataset['n_dim'],
         R=params_dataset['R'],
@@ -519,7 +561,7 @@ if __name__ == '__main__':
     start = time.time()
 
     for epoch in range(burn_epochs):
-        if epoch != 0 and epoch % 10 == 0:  # 10 epochごとに学習率を減少
+        if epoch != 0 and epoch % 5 == 0:  # 10 epochごとに学習率を減少
             rsgd.param_groups[0]["learning_rate"] /= 5
         losses = []
         for pairs, labels in dataloader:
@@ -552,3 +594,6 @@ if __name__ == '__main__':
         basescore += 2 * loss
 
     print(basescore)
+
+    plot_figure(adj_mat, model.get_poincare_table(), "embedding.png")
+    plot_figure(adj_mat, x_e, "original.png")

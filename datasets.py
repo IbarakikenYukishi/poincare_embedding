@@ -1,6 +1,9 @@
 import numpy as np
-from scipy import integrate
 import matplotlib.pyplot as plt
+import os
+from scipy import integrate
+# from embed import create_dataset
+from copy import deepcopy
 
 np.random.seed(0)
 
@@ -98,7 +101,7 @@ def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, T):
 
     print("adj mat generated")
 
-    return adj_mat
+    return adj_mat, x_e
 
 
 def convert_euclid(x_polar):
@@ -117,7 +120,97 @@ def convert_euclid(x_polar):
                     x_euclid[:, i] *= np.sin(x_polar[:, j + 1])
     return x_euclid
 
+def create_dataset(
+    adj_mat,
+    n_max_positives=2,
+    n_max_negatives=10,
+    val_size=0.1
+):
+    # データセットを作成し、trainとvalidationに分ける
+    _adj_mat = deepcopy(adj_mat)
+    n_nodes = _adj_mat.shape[0]
+    for i in range(n_nodes):
+        _adj_mat[i, i] = -1
+    # -1はサンプリング済みの箇所か対角要素
+
+    data = []
+
+    for i in range(n_nodes):
+        # positiveをサンプリング
+        idx_positives = np.where(_adj_mat[i, :] == 1)[0]
+        idx_negatives = np.where(_adj_mat[i, :] == 0)[0]
+        idx_positives = np.random.permutation(idx_positives)
+        idx_negatives = np.random.permutation(idx_negatives)
+        n_positives = min(len(idx_positives), n_max_positives)
+        n_negatives = min(len(idx_negatives), n_max_negatives)
+
+        # node iを固定した上で、positiveなnode jを対象とする。それに対し、
+        for j in idx_positives[0:n_positives]:
+            data.append((i, j, 1))  # positive sample
+
+        # 隣接行列から既にサンプリングしたものを取り除く
+        _adj_mat[i, idx_positives[0:n_positives]] = -1
+        _adj_mat[idx_positives[0:n_positives], i] = -1
+
+        for j in idx_negatives[0:n_negatives]:
+            data.append((i, j, 0))  # positive sample
+
+        # 隣接行列から既にサンプリングしたものを取り除く
+        _adj_mat[i, idx_negatives[0:n_negatives]] = -1
+        _adj_mat[idx_negatives[0:n_negatives], i] = -1
+
+    data = np.random.permutation(data)
+
+    train = data[0:int(len(data) * (1 - val_size))]
+    val = data[int(len(data) * (1 - val_size)):]
+    return train, val
+
 if __name__ == '__main__':
-    adj_mat = hyperbolic_geometric_graph(
-        n_nodes=10000, n_dim=10, R=10, sigma=1, T=10)
-    print(adj_mat)
+
+    params_adj_mat = {
+        'n_nodes': 32000,
+        'n_dim': 5,
+        'R': 10,
+        'sigma': 1,
+        'T': 2
+    }
+    adj_mat, x_e = hyperbolic_geometric_graph(
+        n_nodes=params_adj_mat["n_nodes"],
+        n_dim=params_adj_mat["n_dim"],
+        R=params_adj_mat["R"],
+        sigma=params_adj_mat["sigma"],
+        T=params_adj_mat["T"]
+    )
+
+    # params_dataset = {
+    #     "n_max_positives": params_adj_mat['n_nodes'],  # 全てをサンプリング
+    #     "n_max_negatives": params_adj_mat['n_nodes'],  # 全てをサンプリング
+    #     "val_size": 0
+    # }
+    params_dataset = {
+        "n_max_positives": 10,
+        "n_max_negatives": 100,
+        "val_size": 0
+    }
+    train, val = create_dataset(
+        adj_mat,
+        params_dataset["n_max_positives"],
+        params_dataset["n_max_negatives"],
+        params_dataset["val_size"]
+    )
+
+    graph_dict = {
+        "params_adj_mat": params_adj_mat,
+        "adj_mat": adj_mat,
+        "params_dataset": params_dataset,
+        "train": train,
+        "val": val
+    }
+
+    # 平均次数が少なくなるように手で調整する用
+    print('average degree:', np.sum(adj_mat) / len(adj_mat))
+    print('# of data in train:', len(train))
+    print('# of data in val:', len(val))
+
+    os.makedirs('dataset/dim_'+str(params_adj_mat['n_dim']), exist_ok=True)
+    np.save('dataset/dim_'+str(params_adj_mat['n_dim'])+'/graph_'+str(params_adj_mat['n_nodes'])+'.npy', graph_dict)

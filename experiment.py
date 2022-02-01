@@ -14,7 +14,7 @@ from embed import create_dataset, get_unobserved, Graph, SamplingGraph, RSGD, Po
 if __name__ == '__main__':
     # データセット作成
     params_dataset = {
-        'n_nodes': 10000,
+        'n_nodes': 1000,
         'n_dim': 32,
         'R': 10,
         'sigma': 1,
@@ -43,7 +43,7 @@ if __name__ == '__main__':
         result = pd.DataFrame()
         print("n_graph:", n_graph)
         # 隣接行列
-        adj_mat = hyperbolic_geometric_graph(
+        adj_mat, _ = hyperbolic_geometric_graph(
             n_nodes=params_dataset['n_nodes'],
             n_dim=params_dataset['n_dim'],
             R=params_dataset['R'],
