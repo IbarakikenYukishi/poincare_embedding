@@ -140,7 +140,8 @@ class RSGD(optim.Optimizer):
         R,
         sigma_max,
         sigma_min,
-        beta_max
+        beta_max,
+        beta_min
     ):
         R_e = np.sqrt((np.cosh(R) - 1) / (np.cosh(R) + 1))  # 直交座標系での最適化の範囲
         defaults = {
@@ -148,7 +149,8 @@ class RSGD(optim.Optimizer):
             'R_e': R_e,
             "sigma_max": sigma_max,
             "sigma_min": sigma_min,
-            "beta_max": beta_max
+            "beta_max": beta_max,
+            "beta_min": beta_min
         }
         super().__init__(params, defaults=defaults)
 
@@ -162,15 +164,15 @@ class RSGD(optim.Optimizer):
             sigma = group["params"][1]
 
             beta_update = beta.data - group["learning_rate"] * beta.grad.data
-            beta_update = max(beta_update, 0.1)
+            beta_update = max(beta_update, group["beta_min"])
             beta_update = min(beta_update, group["beta_max"])
             beta.data.copy_(torch.tensor(beta_update))
 
-            # sigma_update = sigma.data - \
-            #     group["learning_rate"] * sigma.grad.data
-            # sigma_update = max(sigma_update, group["sigma_min"])
-            # sigma_update = min(sigma_update, group["sigma_max"])
-            # sigma.data.copy_(torch.tensor(sigma_update))
+            sigma_update = sigma.data - \
+                group["learning_rate"] * sigma.grad.data
+            sigma_update = max(sigma_update, group["sigma_min"])
+            sigma_update = min(sigma_update, group["sigma_max"])
+            sigma.data.copy_(torch.tensor(sigma_update))
 
             print("beta:", beta)
             print("sigma:", sigma)
@@ -183,23 +185,65 @@ class RSGD(optim.Optimizer):
 
                 d_p = p.grad.data
 
-                if d_p.is_sparse:
-                    p_sqnorm = torch.sum(
-                        p[d_p._indices()[0].squeeze()] ** 2, dim=1,
-                        keepdim=True
-                    ).expand_as(d_p._values())
-                    n_vals = d_p._values() * ((1 - p_sqnorm) ** 2) / 4
-                    d_p = torch.sparse.DoubleTensor(
-                        d_p._indices(), n_vals, d_p.size())
-                    update = p.data - group["learning_rate"] * d_p
+                # if d_p.is_sparse:
+                #     p_sqnorm = torch.sum(
+                #         p[d_p._indices()[0].squeeze()] ** 2, dim=1,
+                #         keepdim=True
+                #     ).expand_as(d_p._values())
+                #     n_vals = d_p._values() * ((1 - p_sqnorm) ** 2) / 4
+                #     d_p = torch.sparse.DoubleTensor(
+                #         d_p._indices(), n_vals, d_p.size())
+                #     update = p.data - group["learning_rate"] * d_p
 
-                else:
-                    # 勾配を元に更新。
-                    # torch.normがdim=1方向にまとめていることに注意。
-                    update = torch.clone(p.data)
-                    update -= group["learning_rate"] * \
-                        d_p * \
-                        ((1 - (torch.norm(p, dim=1)**2).reshape((-1, 1)))**2 / 4)
+                # else:
+                #     # 勾配を元に更新。
+                #     # torch.normがdim=1方向にまとめていることに注意。
+                #     update = torch.clone(p.data)
+                #     update -= group["learning_rate"] * \
+                #         d_p * \
+                #         ((1 - (torch.norm(p, dim=1)**2).reshape((-1, 1)))**2 / 4)
+
+                p_norm = torch.norm(p, dim=1, keepdim=True).reshape((-1, 1))
+                d = group["learning_rate"] * d_p * ((1 - p_norm**2)**2 / 4)
+                delta = group["learning_rate"] * d_p
+                Delta = torch.sum(delta * d, dim=1, keepdim=True)
+                F = torch.sum(delta * p, dim=1, keepdim=True)
+                mu = torch.cosh(Delta) - 1
+
+                h_2 = 1 - p_norm**2
+                k = h_2 / (2 * torch.sqrt(torch.cosh(Delta) + 1)) * \
+                    torch.sinc(
+                        Delta / (1.0j * torch.Tensor([np.pi])))  # sincを書く
+                k = k.real
+                t_2 = 2 + mu * (1 + p_norm**2) - 2 * (F**2) * (k**2)
+                xi = (-F * k) * (t_2 - 2 * mu * (p_norm**2) + 2 * (F**2) * (k**2)) - \
+                    t_2 * torch.sqrt(t_2 - mu * p_norm **
+                                     2 + 2 * (F**2) * (k**2))
+                xi = xi / (4 * (p_norm**2) * mu * (F**2) *
+                           (k**2) - 4 * (F**4) * (k**4) + t_2**2)
+
+                update = torch.clone(p.data)
+                update += (h_2 * k * xi - (2 * h_2 * F * (k**2) * (xi**2)) / (1 + torch.sqrt(
+                    1 - 4 * (p_norm**2) * mu * (xi**2) + 4 * (F**2) * (k**2) * (xi**2)))) * delta
+                update += (2 * h_2 * mu * (xi**2) / (1 + torch.sqrt(1 - 4 * (p_norm**2)
+                                                                    * mu * (xi**2) + 4 * (F**2) * (k**2) * (xi**2)))) * torch.clone(p.data)
+                # print(update)
+                # print(p_update)
+                # print(p_norm.shape)
+                # print(d.shape)
+                # print(delta.shape)
+                # print(Delta.shape)
+                # print(F.shape)
+                # print(mu.shape)
+                # print(h_2.shape)
+                # print(k.shape)
+                # print(t_2.shape)
+                # print(xi.shape)
+                # raise ValueError
+
+                # print(torch.sinc(torch.tensor(
+                #     5.0 / (1.0j * torch.Tensor([np.pi])))))
+
                 # 発散したところなどを補正
                 is_nan_inf = torch.isnan(update) | torch.isinf(update)
                 update = torch.where(is_nan_inf, p, update)
@@ -271,7 +315,6 @@ class Poincare(nn.Module):
         # z自体のロス
         # rのロス
         def latent_lik(x):
-            # D = x.shape[1]
             # 座標変換
             # 半径方向
             r = h_dist(x, torch.Tensor([[0.0]]))
@@ -282,27 +325,14 @@ class Poincare(nn.Module):
             x_ = torch.max(torch.Tensor([[0.000001]]), x_)
             # 角度方向
             sin_theta = torch.zeros((x.shape[0], self.n_dim - 1))
-            # sinの導出
             for j in range(1, self.n_dim - 1):
                 sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
 
             # rの尤度
-            # print(r)
-            # lik=torch.where(
-            #     r>0.001/self.sigma,
-            #     -(self.n_dim - 1) * (torch.log(1 -torch.exp(-2*self.sigma * r)+0.00001) + self.sigma * r - torch.log(torch.Tensor([2]))),
-            #     # -(self.n_dim - 1) * (torch.log(torch.sinh(self.sigma*r)))
-            #     -(self.n_dim - 1) * (-torch.exp(-2*self.sigma*r)-0.5*torch.exp(-4*self.sigma*r) + self.sigma * r - torch.log(torch.Tensor([2]))) # マクローリン展開
-            # )
-            lik = -(self.n_dim - 1) * (torch.log(1 -torch.exp(-2*self.sigma * r)+0.00001) + self.sigma * r - torch.log(torch.Tensor([2])))
+            lik = -(self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * self.sigma *
+                                                               r) + 0.00001) + self.sigma * r - torch.log(torch.Tensor([2])))
 
-            # lik = -(self.n_dim - 1) * (torch.log(1 -torch.exp(-2*self.sigma * r)) + self.sigma * r - torch.log(torch.Tensor([2])))
-            # print("途中の項:",torch.sinh(self.sigma*r))
-            # print(torch.log(torch.sinh(self.sigma*r)))
-            # print(self.sigma)
-            # print("lik:", lik)
             # rの正規化項
-
             log_C_D = torch.Tensor([(self.n_dim - 1) * self.sigma *
                                     self.R - (self.n_dim - 1) * np.log(2)])  # 支配項
             # のこり。計算はwikipediaの再帰計算で代用してもいいかも
@@ -322,13 +352,9 @@ class Poincare(nn.Module):
                     return ret - (n - 1) / n * integral_sinh(n - 2)
 
             C = torch.Tensor([integral_sinh(self.n_dim - 1)])
-
-            # numerator = lambda r: ((torch.exp(
-            #     self.sigma * (r - self.R)) - torch.exp(-self.sigma * (r + self.R))))**(self.n_dim - 1)
-            # C = torch.Tensor([integrate.quad(numerator, 0, self.R)[0]])
-            # print(C)
             log_C_D = log_C_D + torch.Tensor(torch.log(C))
-            # print("log_C_D:", log_C_D)
+
+            print(log_C_D)
 
             lik = lik + log_C_D
 
@@ -343,16 +369,10 @@ class Poincare(nn.Module):
 
             lik = lik + torch.log(2 * torch.Tensor([np.pi]))
 
-            # print(lik)
-
-            # raise ValueError
-
             return lik
 
         lik_us = latent_lik(us)
         lik_vs = latent_lik(vs)
-        # print(self.I_D)
-        # print((lik_vs + lik_us) / (self.n_nodes - 1))
 
         loss = loss + (lik_us + lik_vs) / (self.n_nodes - 1)
         # print("loss")
@@ -362,180 +382,6 @@ class Poincare(nn.Module):
 
     def get_poincare_table(self):
         return self.table.weight.data.cpu().numpy()
-
-'''
-def sampling_related_nodes(pair, label, dataset, n_samples=5):
-    # uとvに関わるデータを5個ずつサンプリングする。
-    # n_samplesが大きすぎるとエラーが出る可能性がある。
-    u = pair[0, 0].item()
-    v = pair[0, 1].item()
-    u_indice = np.union1d(np.where(dataset[:, 0] == u)[
-                          0], np.where(dataset[:, 1] == u)[0])
-    u_indice = np.random.choice(u_indice, size=n_samples, replace=False)
-    v_indice = np.union1d(np.where(dataset[:, 0] == v)[
-                          0], np.where(dataset[:, 1] == v)[0])
-    v_indice = np.random.choice(v_indice, size=n_samples, replace=False)
-
-    pair_ = torch.cat((pair, torch.Tensor(
-        dataset[u_indice, 0:2]), torch.Tensor(dataset[v_indice, 0:2])), dim=0).long()
-    label_ = torch.cat((label.reshape((-1, 1)), torch.Tensor(dataset[
-                       u_indice, 2].reshape((-1, 1))), torch.Tensor(dataset[v_indice, 2].reshape((-1, 1))))).long()
-
-    del u_indice, v_indice
-
-    return pair_, label_
-
-
-def _mle(idx, model, pairs, labels, n_iter, learning_rate, R, dataset):
-    print(idx)
-    # あるデータの尤度を計算する補助関数。
-    _model = deepcopy(model)
-    rsgd = RSGD(model.parameters(), learning_rate=learning_rate,
-                R=R)
-    pair = pairs[idx].reshape((1, -1))
-    label = labels[idx]
-
-    # uとvに関わるデータを5個ずつサンプリングする。
-    pair_, label_ = sampling_related_nodes(pair, label, dataset)
-
-    for _ in range(n_iter):
-        rsgd.zero_grad()
-        loss = model(pair_, label_).mean()
-        loss.backward()
-        rsgd.step()
-
-    del pair_
-    del label_
-
-    return model(pair, label).item()
-
-
-def calc_lik_pc_cpu(model, val_pair, val_label, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
-    # parametric complexityをサンプリングで計算する補助関数。
-    n_samples = len(labels)
-
-    # 0番目のデータにvalidationをおいておく。
-    pairs_ = torch.cat((val_pair, pairs), dim=0)
-    labels_ = torch.cat((val_label.reshape((-1, 1)),
-                         labels.reshape((-1, 1))), dim=0)
-
-    mle = partial(_mle, model=model, pairs=pairs_, labels=labels_,
-                  n_iter=n_iter, learning_rate=learning_rate, R=R, dataset=dataset)
-
-    # pytorchを使うときはこれを使わないとダメらしい。
-    with multi.get_context('spawn').Pool(multi.cpu_count() - 1) as p:
-        args = list(range(n_samples + 1))
-        res = p.map(mle, args)
-    # resは-log p
-    lik = res[0]
-    res = -np.array(res[1:])  # log p
-    res = np.exp(res[1:])  # p
-    res = np.mean(res[1:])  # pの平均
-
-    del pairs_
-    del labels_
-
-    return lik, np.log(n_possibles) + np.log(res)
-
-
-def calc_lik_pc_gpu(model, val_pair, val_label, pairs, labels, n_possibles, n_iter, learning_rate, R, dataset):
-    # multiprocessingが動かないのでおまじない。
-    import resource
-    rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
-
-    # parametric complexityをサンプリングで計算する補助関数。
-    n_samples = len(labels)
-
-    # 0番目のデータにvalidationをおいておく。
-    pairs_ = torch.cat((val_pair, pairs), dim=0)
-    labels_ = torch.cat((val_label.reshape((-1, 1)),
-                         labels.reshape((-1, 1))), dim=0)
-
-    res = []
-
-    create_sub_dataset = partial(_create_sub_dataset, pairs=pairs_,
-                                 labels=labels_, dataset=dataset)
-
-    # pytorchを使用するときはspawnを指定
-    with multi.get_context('spawn').Pool(multi.cpu_count() - 1) as p:
-        args = list(range(n_samples))
-        sub_dataset = p.map(create_sub_dataset, args)
-
-    sub_dataset = torch.stack(sub_dataset, dim=0)
-
-    # print(sub_dataset.shape)
-
-    mle_gpu = partial(_mle_gpu, n_div=4, model=model, sub_dataset=sub_dataset,
-                      n_iter=n_iter, learning_rate=learning_rate, R=R)
-
-    multi.set_sharing_strategy('file_system')
-
-    with multi.get_context('spawn').Pool(4) as p:
-        args = list(range(4))
-        res = p.map(mle_gpu, args)
-
-    res = np.array(res).reshape(-1)
-
-    # resは-log p
-    lik = res[0]
-    res = -np.array(res[1:])  # log p
-    res = np.exp(res[1:])  # p
-    res = np.mean(res[1:])  # pの平均
-
-    del pairs_
-    del labels_
-
-    return lik, np.log(n_possibles) + np.log(res)
-
-
-def _mle_gpu(idx, model, n_div, sub_dataset, n_iter, learning_rate, R):
-    device = "cuda:" + str(idx)
-
-    n_samples = len(sub_dataset)
-    # gpuの個数で割ったデータ分だけ切り出し、GPUに送る。
-    _sub_dataset = sub_dataset[
-        int(n_samples * idx / n_div): int(n_samples * (idx + 1) / n_div)]
-    _sub_dataset = _sub_dataset.to(device)
-
-    #　返り値
-    res = []
-
-    for datum in _sub_dataset:
-        pair_ = datum[:, 0:2]
-        label_ = datum[:, 2]
-        # モデルとoptimizer
-        model_ = deepcopy(model)
-        model_.to(device)
-        rsgd = RSGD(model_.parameters(), learning_rate=learning_rate,
-                    R=R)
-        # データの組を準備
-        for _ in range(n_iter):
-            rsgd.zero_grad()
-            loss = model_(pair_, label_).mean()
-            loss.backward()
-            rsgd.step()
-
-        res.append(model_(pair_[0].reshape((1, -1)), label_[0]).item())
-
-        del pair_
-        del label_
-        del model_
-
-    return res
-
-
-def _create_sub_dataset(idx, pairs, labels, dataset):
-    pair = pairs[idx].reshape((1, -1))
-    label = labels[idx]
-    # uとvに関わるデータを5個ずつサンプリングする。
-    pair_, label_ = sampling_related_nodes(pair, label, dataset)
-
-    # tripletにして返す。
-    triplets = torch.cat([pair_, label_], dim=1)
-
-    return triplets
-'''
 
 
 def plot_figure(adj_mat, table, path):
@@ -593,7 +439,7 @@ if __name__ == '__main__':
     loader_workers = 16
     print("loader_workers: ", loader_workers)
     shuffle = True
-    sparse = True
+    sparse = False
 
     model_n_dim = 2
 
@@ -645,9 +491,10 @@ if __name__ == '__main__':
     rsgd = RSGD(model.parameters(),
                 learning_rate=learning_rate,
                 R=params_dataset['R'],
-                sigma_max=10.0,
+                sigma_max=1.0,
                 sigma_min=0.001,
-                beta_max=20.0
+                beta_max=10.0,
+                beta_min=0.1
                 )
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
