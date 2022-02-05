@@ -309,9 +309,6 @@ class RSGD(optim.Optimizer):
                 # print(xi.shape)
                 # raise ValueError
 
-                # print(torch.sinc(torch.tensor(
-                #     5.0 / (1.0j * torch.Tensor([np.pi])))))
-
                 # 発散したところなどを補正
                 is_nan_inf = torch.isnan(update) | torch.isinf(update)
                 update = torch.where(is_nan_inf, p, update)
@@ -443,8 +440,6 @@ class Poincare(nn.Module):
         lik_vs = latent_lik(vs)
 
         loss = loss + (lik_us + lik_vs) / (self.n_nodes - 1)
-        # print("loss")
-        # print(loss)
 
         return loss
 
@@ -513,7 +508,7 @@ class Poincare(nn.Module):
 
             return torch.sqrt(first_term - second_term)
 
-        return 0.5*(np.log(self.n_nodes)+np.log(self.n_nodes-1)-np.log(4*np.pi))+np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5*(np.log(self.n_nodes)-np.log(2*np.pi))+np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
+        return 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5 * (np.log(self.n_nodes) - np.log(2 * np.pi)) + np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
 
 
 def plot_figure(adj_mat, table, path):
@@ -553,58 +548,156 @@ def plot_figure(adj_mat, table, path):
     plt.savefig(path)
     plt.close()
 
-if __name__ == '__main__':
-    # データセット作成
-    params_dataset = {
-        'n_nodes': 128,
-        'n_dim': 5,
-        'R': 10,
-        'sigma': 0.5,
-        'beta': 0.2  # Tが小さすぎると最適化のときにinfが増えてバグる。
-    }
 
-    # パラメータ
-    burn_epochs = 500
-    burn_batch_size = 12
-    n_max_positives = 2
-    n_max_negatives = 20
-    learning_rate = 10.0 * \
-        (burn_batch_size * (n_max_positives + n_max_negatives)) / \
-        32  # batchサイズに対応して学習率変更
-    sigma_max = 1.0
-    sigma_min = 0.001
-    beta_min = 0.1
-    beta_max = 10.0
-    # それ以外
-    loader_workers = 16
-    print("loader_workers: ", loader_workers)
-    shuffle = True
-    sparse = False
-
-    model_n_dim = 4
-
-    result = pd.DataFrame()
-    # 隣接行列
-    adj_mat, x_e = hyperbolic_geometric_graph(
-        n_nodes=params_dataset['n_nodes'],
-        n_dim=params_dataset['n_dim'],
-        R=params_dataset['R'],
-        sigma=params_dataset['sigma'],
-        beta=params_dataset['beta']
+def CV_HGG(
+    adj_mat,
+    params_dataset,
+    model_n_dim,
+    burn_epochs,
+    burn_batch_size,
+    n_max_positives,
+    n_max_negatives,
+    learning_rate,
+    sigma_min,
+    sigma_max,
+    beta_min,
+    beta_max,
+    k_folds=5,
+    loader_workers=16,
+    shuffle=True,
+    sparse=False
+):
+    data, _ = create_dataset(
+        adj_mat=adj_mat,
+        n_max_positives=5,
+        n_max_negatives=50,
+        val_size=0.0
     )
-    # train, val = create_dataset(
-    #     adj_mat=adj_mat,
-    #     n_max_positives=5,
-    #     n_max_negatives=50,
-    #     val_size=0.02
-    # )
 
-    # print(len(val))
+    # print(data.shape)
 
-    # 平均次数が少なくなるように手で調整する用
-    print('average degree:', np.sum(adj_mat) / len(adj_mat))
+    CV_score = 0
 
-    # u_adj_mat = get_unobserved(adj_mat, train)
+    for fold in range(k_folds):
+        train_index = np.array([])
+        val_index = np.array([])
+        for j in range(k_folds):
+            if j == fold:
+                val_index = np.append(val_index, np.array(
+                    range(int(len(data) * j / k_folds), int(len(data) * (j + 1) / k_folds))))
+            else:
+                train_index = np.append(train_index, np.array(
+                    range(int(len(data) * j / k_folds), int(len(data) * (j + 1) / k_folds))))
+
+        train_index = np.array(train_index).reshape(-1).astype(np.int)
+        val_index = np.array(val_index).reshape(-1).astype(np.int)
+
+        # print(train_index)
+        # print(val_index)
+
+        train = data[train_index, :]
+        val = data[val_index, :]
+
+        dataloader = DataLoader(
+            Graph(train),
+            shuffle=shuffle,
+            batch_size=256,
+            num_workers=loader_workers,
+            pin_memory=True
+        )
+
+        # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
+        # 平均次数とかから逆算できる気がする。
+        model = Poincare(
+            n_nodes=params_dataset['n_nodes'],
+            n_dim=model_n_dim,  # モデルの次元
+            R=params_dataset['R'],
+            sigma=params_dataset['sigma'],
+            beta=params_dataset['beta'],
+            init_range=0.001,
+            sparse=sparse
+        )
+        # 最適化関数。
+        rsgd = RSGD(
+            model.parameters(),
+            learning_rate=learning_rate,
+            R=params_dataset['R'],
+            sigma_max=sigma_max,
+            sigma_min=sigma_min,
+            beta_max=beta_max,
+            beta_min=beta_min
+        )
+
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # device="cpu"
+        # device = "cuda:0"
+        model.to(device)
+        # model=nn.DataParallel(model, device_ids=[0, 1, 2, 3])
+
+        loss_history = []
+
+        start = time.time()
+
+        for epoch in range(burn_epochs):
+            if epoch != 0 and epoch % 50 == 0:  # 10 epochごとに学習率を減少
+                rsgd.param_groups[0]["learning_rate"] /= 5
+            losses = []
+            for pairs, labels in dataloader:
+
+                pairs = pairs.to(device)
+                labels = labels.to(device)
+
+                rsgd.zero_grad()
+                loss = model(pairs, labels).mean()
+                loss.backward()
+                rsgd.step()
+                losses.append(loss)
+
+            loss_history.append(torch.Tensor(losses).mean().item())
+            print("epoch:", epoch, ", loss:",
+                  torch.Tensor(losses).mean().item())
+
+        elapsed_time = time.time() - start
+        print("elapsed_time:{0}".format(elapsed_time) + "[sec]")
+
+        dataloader_all = DataLoader(
+            Graph(val),
+            shuffle=shuffle,
+            batch_size=burn_batch_size,
+            num_workers=loader_workers,
+            pin_memory=True
+        )
+
+        # -2*log(p)の計算
+        basescore_y_and_z = 0
+        basescore_y_given_z = 0
+        for pairs, labels in dataloader_all:
+            pairs = pairs.to(device)
+            labels = labels.to(device)
+
+            CV_score += model(pairs, labels).sum().item()
+            # basescore_y_given_z += model.y_given_z(pairs, labels).sum().item()
+
+    print("CV_score:", CV_score)
+
+
+def DNML_HGG(
+    adj_mat,
+    params_dataset,
+    model_n_dim,
+    burn_epochs,
+    burn_batch_size,
+    n_max_positives,
+    n_max_negatives,
+    learning_rate,
+    sigma_min,
+    sigma_max,
+    beta_min,
+    beta_max,
+    loader_workers=16,
+    shuffle=True,
+    sparse=False
+):
 
     print("model_n_dim:", model_n_dim)
     # burn-inでの処理
@@ -615,14 +708,6 @@ if __name__ == '__main__':
         num_workers=loader_workers,
         pin_memory=True
     )
-
-    # dataloader = DataLoader(
-    #     Graph(train),
-    #     shuffle=shuffle,
-    #     batch_size=burn_batch_size,
-    #     num_workers=loader_workers,
-    #     pin_memory=True
-    # )
 
     # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
     # 平均次数とかから逆算できる気がする。
@@ -695,7 +780,7 @@ if __name__ == '__main__':
     dataloader_all = DataLoader(
         Graph(data),
         shuffle=shuffle,
-        batch_size=burn_batch_size,
+        batch_size=burn_batch_size*(n_max_negatives+n_max_positives),
         num_workers=loader_workers,
         pin_memory=True
     )
@@ -711,20 +796,126 @@ if __name__ == '__main__':
         basescore_y_given_z += model.y_given_z(pairs, labels).sum().item()
 
     AIC_naive = basescore_y_given_z + \
-        params_dataset['n_nodes'] * params_dataset['n_dim']
-    BIC_naive = basescore_y_given_z + (params_dataset['n_nodes'] * params_dataset['n_dim'] / 2) * (
+        params_dataset['n_nodes'] * model_n_dim
+    BIC_naive = basescore_y_given_z + (params_dataset['n_nodes'] * model_n_dim / 2) * (
         np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
 
     pc_first, pc_second = model.get_PC(
         sigma_max, sigma_min, beta_max, beta_min)
     # print(pc_first, pc_second)
-    DNML_codelength=basescore_y_and_z+pc_first+pc_second
+    DNML_codelength = basescore_y_and_z + pc_first + pc_second
 
-    print(basescore_y_and_z)
-    print(basescore_y_given_z)
-    print("DNML:",DNML_codelength)
-    print("AIC naive:",AIC_naive)
-    print("BIC_naive:",BIC_naive)
+    print("p(y, z; theta):", basescore_y_and_z)
+    print("p(y|z; theta):", basescore_y_given_z)
+    print("DNML:", DNML_codelength)
+    print("AIC naive:", AIC_naive)
+    print("BIC_naive:", BIC_naive)
+
+    return basescore_y_and_z, basescore_y_given_z, DNML_codelength, AIC_naive, BIC_naive
+
+
+if __name__ == '__main__':
+    # データセット作成
+    params_dataset = {
+        'n_nodes': 1000,
+        'n_dim': 5,
+        'R': 10,
+        'sigma': 0.1,
+        'beta': 0.3
+    }
+
+    # パラメータ
+    burn_epochs = 500
+    burn_batch_size = 12
+    n_max_positives = int(params_dataset["n_nodes"]*0.02)
+    n_max_negatives = n_max_positives*10
+    learning_rate = 10.0 * \
+        (burn_batch_size * (n_max_positives + n_max_negatives)) / \
+        32  # batchサイズに対応して学習率変更
+    sigma_max = 1.0
+    sigma_min = 0.001
+    beta_min = 0.1
+    beta_max = 10.0
+    # それ以外
+    loader_workers = 16
+    print("loader_workers: ", loader_workers)
+    shuffle = True
+    sparse = False
+
+    # 隣接行列
+    adj_mat, x_e = hyperbolic_geometric_graph(
+        n_nodes=params_dataset['n_nodes'],
+        n_dim=params_dataset['n_dim'],
+        R=params_dataset['R'],
+        sigma=params_dataset['sigma'],
+        beta=params_dataset['beta']
+    )
+
+    # 平均次数が少なくなるように手で調整する用
+    print('average degree:', np.sum(adj_mat) / len(adj_mat))
+
+    result = pd.DataFrame()
+    basescore_y_and_z_list = []
+    basescore_y_given_z_list = []
+    DNML_codelength_list = []
+    AIC_naive_list = []
+    BIC_naive_list = []
+
+    model_n_dims = [2, 3, 4, 5, 6, 7, 8]
+    true_dims=[5, ]
+    n_graphs=1
+
+    for model_n_dim in model_n_dims:
+        basescore_y_and_z, basescore_y_given_z, DNML_codelength, AIC_naive, BIC_naive = DNML_HGG(
+            adj_mat=adj_mat,
+            params_dataset=params_dataset,
+            model_n_dim=model_n_dim,
+            burn_epochs=burn_epochs,
+            burn_batch_size=burn_batch_size,
+            n_max_positives=n_max_positives,
+            n_max_negatives=n_max_negatives,
+            learning_rate=learning_rate,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            beta_min=beta_min,
+            beta_max=beta_max,
+            loader_workers=16,
+            shuffle=True,
+            sparse=False
+        )
+        basescore_y_and_z_list.append(basescore_y_and_z)
+        basescore_y_given_z_list.append(basescore_y_given_z)
+        DNML_codelength_list.append(DNML_codelength)
+        AIC_naive_list.append(AIC_naive)
+        BIC_naive_list.append(BIC_naive)
+
+    result["model_n_dims"] = model_n_dims
+    result["DNML_codelength"] = DNML_codelength_list
+    result["AIC_naive"] = AIC_naive_list
+    result["BIC_naive"] = BIC_naive_list
+    result["basescore_y_and_z"] = basescore_y_and_z_list
+    result["basescore_y_given_z"] = basescore_y_given_z_list
+
+    result.to_csv("result.csv", index=False)
+
+    # CV_HGG(
+    #     adj_mat=adj_mat,
+    #     params_dataset=params_dataset,
+    #     model_n_dim=model_n_dim,
+    #     burn_epochs=burn_epochs,
+    #     burn_batch_size=burn_batch_size,
+    #     n_max_positives=n_max_positives,
+    #     n_max_negatives=n_max_negatives,
+    #     learning_rate=learning_rate,
+    #     sigma_min=sigma_min,
+    #     sigma_max=sigma_max,
+    #     beta_min=beta_min,
+    #     beta_max=beta_max,
+    #     k_folds=5,
+    #     loader_workers=16,
+    #     shuffle=True,
+    #     sparse=False
+    # )
 
     # plot_figure(adj_mat, model.get_poincare_table(), "embedding.png")
     # plot_figure(adj_mat, x_e, "original.png")

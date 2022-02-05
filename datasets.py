@@ -21,11 +21,11 @@ def h_dist(u_e, v_e):
     return np.arccosh(ret)
 
 
-def connection_prob(d, R, T):
+def connection_prob(d, R, beta):
     """
     接続確率
     """
-    return 1 / (1 + np.exp((d - R) / T))
+    return 1 / (1 + beta * np.exp((d - R)))
 
 
 def calc_dist_angle(n_dim, n, div=INTEGRAL_DIV):
@@ -56,7 +56,7 @@ def calc_dist_r(n_dim, sigma, R, div=INTEGRAL_DIV):
     return r_array, cum_dens
 
 
-def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, T):
+def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, beta):
     # TODO: プログラム前半部分も実行時間を短くする。
     # 現状は次元の2乗オーダーの計算量
     # n_dimは2以上で
@@ -93,7 +93,7 @@ def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, T):
     for i in range(n_nodes):
         numerator_mat[i, i] = 0
     adj_mat = np.arccosh(1 + 2 * numerator_mat / denominator_mat)
-    adj_mat = connection_prob(adj_mat, R, T)
+    adj_mat = connection_prob(adj_mat, R, beta)
     # 対角成分は必要ない
     for i in range(n_nodes):
         adj_mat[i, i] = 0
@@ -119,6 +119,7 @@ def convert_euclid(x_polar):
                 else:
                     x_euclid[:, i] *= np.sin(x_polar[:, j + 1])
     return x_euclid
+
 
 def create_dataset(
     adj_mat,
@@ -172,14 +173,14 @@ if __name__ == '__main__':
         'n_dim': 5,
         'R': 10,
         'sigma': 1,
-        'T': 2
+        'beta': 0.5
     }
     adj_mat, x_e = hyperbolic_geometric_graph(
         n_nodes=params_adj_mat["n_nodes"],
         n_dim=params_adj_mat["n_dim"],
         R=params_adj_mat["R"],
         sigma=params_adj_mat["sigma"],
-        T=params_adj_mat["T"]
+        beta=params_adj_mat["beta"]
     )
 
     # params_dataset = {
@@ -212,5 +213,6 @@ if __name__ == '__main__':
     print('# of data in train:', len(train))
     print('# of data in val:', len(val))
 
-    os.makedirs('dataset/dim_'+str(params_adj_mat['n_dim']), exist_ok=True)
-    np.save('dataset/dim_'+str(params_adj_mat['n_dim'])+'/graph_'+str(params_adj_mat['n_nodes'])+'.npy', graph_dict)
+    os.makedirs('dataset/dim_' + str(params_adj_mat['n_dim']), exist_ok=True)
+    np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
+        params_adj_mat['n_nodes']) + '.npy', graph_dict)
