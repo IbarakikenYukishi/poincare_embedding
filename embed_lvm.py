@@ -862,8 +862,8 @@ if __name__ == '__main__':
     BIC_naive_list = []
 
     model_n_dims = [2, 3, 4, 5, 6, 7, 8]
-    true_dims=[5, ]
-    n_graphs=1
+    # true_dims=[5]
+    # n_graphs=1
 
     for model_n_dim in model_n_dims:
         basescore_y_and_z, basescore_y_given_z, DNML_codelength, AIC_naive, BIC_naive = DNML_HGG(
