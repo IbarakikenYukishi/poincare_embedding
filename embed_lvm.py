@@ -87,45 +87,113 @@ class Graph(Dataset):
         return self.data[i, 0:2], self.data[i, 2]
 
 
-class SamplingGraph(Dataset):
+class NegGraph(Dataset):
 
     def __init__(
         self,
         adj_mat,
-        n_max_data=1100,
-        positive_size=1 / 2,  # 一様にしないという手もある。
+        n_max_positives=5,
+        n_max_negatives=50,
     ):
-        self.adj_mat = deepcopy(adj_mat)
-        self.n_nodes = self.adj_mat.shape[0]
+        # データセットを作成し、trainとvalidationに分ける
+        self.n_max_positives = n_max_positives
+        self.n_max_negatives = n_max_negatives
+        self._adj_mat = deepcopy(adj_mat)
+        self.n_nodes = self._adj_mat.shape[0]
         for i in range(self.n_nodes):
-            self.adj_mat[i, 0:i + 1] = -1
-        # print(self.adj_mat)
-        # 今まで観測されていないデータからのみノードの組をサンプルをする。
-        data_unobserved = np.array(np.where(self.adj_mat != -1)).T
-        n_data = min(n_max_data, len(data_unobserved))
-        self.n_possibles = 2 * len(data_unobserved)
-        data_sampled = np.random.choice(
-            np.arange(len(data_unobserved)), size=n_data, replace=False)
-        data_sampled = data_unobserved[data_sampled, :]
-        # ラベルを人工的に作成する。
-        labels = np.zeros(n_data)
-        labels[0:int(n_data * positive_size)] = 1
-        # 連結してデータとする。
-        self.data = np.concatenate(
-            [data_sampled, labels.reshape((-1, 1))], axis=1)
-        self.data = torch.Tensor(self.data).long()
-        self.n_items = len(self.data)
+            self._adj_mat[i, i] = -1
 
     def __len__(self):
         # データの長さを返す関数
-        return self.n_items
+        return self.n_nodes
 
     def __getitem__(self, i):
-        # ノードとラベルを返す。
-        return self.data[i, 0:2], self.data[i, 2]
 
-    def get_all_data(self):
-        return self.data[:, 0:2], self.data[:, 2], self.n_possibles
+        data = []
+
+        # positiveをサンプリング
+        idx_positives = np.where(self._adj_mat[i, :] == 1)[0]
+        idx_negatives = np.where(self._adj_mat[i, :] == 0)[0]
+        idx_positives = np.random.permutation(idx_positives)
+        idx_negatives = np.random.permutation(idx_negatives)
+        n_positives = min(len(idx_positives), n_max_positives)
+        n_negatives = min(len(idx_negatives), n_max_negatives)
+
+        # node iを固定した上で、positiveなnode jを対象とする。それに対し、
+        for j in idx_positives[0:n_positives]:
+            data.append((i, j, 1))  # positive sample
+
+        for j in idx_negatives[0:n_negatives]:
+            data.append((i, j, 0))  # negative sample
+
+        if n_positives + n_negatives < n_max_positives + n_max_negatives:
+            rest = n_max_positives + n_max_negatives - \
+                (n_positives + n_negatives)
+            rest_idx = np.append(
+                idx_positives[n_positives:], idx_negatives[n_negatives:])
+            rest_label = np.append(np.ones(len(idx_positives) - n_positives), np.zeros(
+                len(idx_negatives) - n_negatives))
+
+            rest_data = np.append(rest_idx.reshape(
+                (-1, 1)), rest_label.reshape((-1, 1)), axis=1).astype(np.int)
+
+            rest_data = np.random.permutation(rest_data)
+
+            # print(rest_data)
+
+            for datum in rest_data[:rest]:
+                # print(datum)
+                data.append((i, datum[0], datum[1]))
+
+            # print(data)
+
+        data = np.random.permutation(data)
+
+        torch.Tensor(data).long()
+
+        # ノードとラベルを返す。
+        return data[:, 0:2], data[:, 2]
+
+
+# class SamplingGraph(Dataset):
+
+#     def __init__(
+#         self,
+#         adj_mat,
+#         n_max_data=1100,
+#         positive_size=1 / 2,  # 一様にしないという手もある。
+#     ):
+#         self.adj_mat = deepcopy(adj_mat)
+#         self.n_nodes = self.adj_mat.shape[0]
+#         for i in range(self.n_nodes):
+#             self.adj_mat[i, 0:i + 1] = -1
+#         # print(self.adj_mat)
+#         # 今まで観測されていないデータからのみノードの組をサンプルをする。
+#         data_unobserved = np.array(np.where(self.adj_mat != -1)).T
+#         n_data = min(n_max_data, len(data_unobserved))
+#         self.n_possibles = 2 * len(data_unobserved)
+#         data_sampled = np.random.choice(
+#             np.arange(len(data_unobserved)), size=n_data, replace=False)
+#         data_sampled = data_unobserved[data_sampled, :]
+#         # ラベルを人工的に作成する。
+#         labels = np.zeros(n_data)
+#         labels[0:int(n_data * positive_size)] = 1
+#         # 連結してデータとする。
+#         self.data = np.concatenate(
+#             [data_sampled, labels.reshape((-1, 1))], axis=1)
+#         self.data = torch.Tensor(self.data).long()
+#         self.n_items = len(self.data)
+
+#     def __len__(self):
+#         # データの長さを返す関数
+#         return self.n_items
+
+#     def __getitem__(self, i):
+#         # ノードとラベルを返す。
+#         return self.data[i, 0:2], self.data[i, 2]
+
+#     def get_all_data(self):
+#         return self.data[:, 0:2], self.data[:, 2], self.n_possibles
 
 
 class RSGD(optim.Optimizer):
@@ -174,9 +242,9 @@ class RSGD(optim.Optimizer):
             sigma_update = min(sigma_update, group["sigma_max"])
             sigma.data.copy_(torch.tensor(sigma_update))
 
-            print("beta:", beta)
-            print("sigma:", sigma)
-            print("sigma.grad:", sigma.grad)
+            # print("beta:", beta)
+            # print("sigma:", sigma)
+            # print("sigma.grad:", sigma.grad)
 
             # うめこみの更新
             for p in group["params"][2:]:
@@ -292,6 +360,19 @@ class Poincare(nn.Module):
 
         nn.init.uniform_(self.table.weight, -init_range, init_range)
 
+    def integral_sinh(self, n):  # (exp(sigma*R)/2)^(D-1)で割った結果
+        if n == 0:
+            return self.R * (2 * torch.exp(-self.sigma * self.R))**(self.n_dim - 1)
+        elif n == 1:
+            return 1 / self.sigma * (1 + torch.exp(-2 * self.sigma * self.R) - 2 * torch.exp(-self.sigma * self.R)) * (2 * torch.exp(-self.sigma * self.R))**(self.n_dim - 2)
+        else:
+            ret = 1 / (self.sigma * n)
+            ret = ret * (1 - torch.exp(-2 * self.sigma * self.R)
+                         )**(n - 1) * (1 + torch.exp(-2 * self.sigma * self.R))
+            ret = ret * (2 * torch.exp(-self.sigma * self.R)
+                         )**(self.n_dim - 1 - n)
+            return ret - (n - 1) / n * self.integral_sinh(n - 2)
+
     def forward(
         self,
         pairs,
@@ -338,23 +419,10 @@ class Poincare(nn.Module):
             # のこり。計算はwikipediaの再帰計算で代用してもいいかも
             # https://en.wikipedia.org/wiki/List_of_integrals_of_hyperbolic_functions
 
-            def integral_sinh(n):
-                if n == 0:
-                    return self.R * (2 * torch.exp(-self.sigma * self.R))**(self.n_dim - 1)
-                elif n == 1:
-                    return 1 / self.sigma * (1 + torch.exp(-2 * self.sigma * self.R) - 2 * torch.exp(-self.sigma * self.R)) * (2 * torch.exp(-self.sigma * self.R))**(self.n_dim - 2)
-                else:
-                    ret = 1 / (self.sigma * n)
-                    ret = ret * (1 - torch.exp(-2 * self.sigma * self.R)
-                                 )**(n - 1) * (1 + torch.exp(-2 * self.sigma * self.R))
-                    ret = ret * (2 * torch.exp(-self.sigma * self.R)
-                                 )**(self.n_dim - 1 - n)
-                    return ret - (n - 1) / n * integral_sinh(n - 2)
-
-            C = torch.Tensor([integral_sinh(self.n_dim - 1)])
+            C = torch.Tensor([self.integral_sinh(self.n_dim - 1)])
             log_C_D = log_C_D + torch.Tensor(torch.log(C))
 
-            print(log_C_D)
+            # print(log_C_D)
 
             lik = lik + log_C_D
 
@@ -380,8 +448,72 @@ class Poincare(nn.Module):
 
         return loss
 
+    def y_given_z(
+        self,
+        pairs,
+        labels
+    ):
+        # 座標を取得
+        us = self.table(pairs[:, 0])
+        vs = self.table(pairs[:, 1])
+
+        # ロス計算
+        dist = h_dist(us, vs)
+        loss = torch.clone(labels).float()
+        # 数値計算の問題をlogaddexpで回避
+        # zを固定した下でのyのロス
+        loss = torch.where(
+            loss == 1,
+            torch.logaddexp(torch.tensor([0]), self.beta * (dist - self.R)),
+            torch.logaddexp(torch.tensor([0]), -self.beta * (dist - self.R))
+        )
+
+        return loss
+
     def get_poincare_table(self):
         return self.table.weight.data.cpu().numpy()
+
+    def get_PC(
+        self,
+        sigma_max,
+        sigma_min,
+        beta_max,
+        beta_min
+    ):
+        # DNMLのPCの計算
+        x_e = self.get_poincare_table()
+        norm_x_e_2 = np.sum(x_e**2, axis=1).reshape((-1, 1))
+        denominator_mat = (1 - norm_x_e_2) * (1 - norm_x_e_2.T)
+        numerator_mat = norm_x_e_2 + norm_x_e_2.T
+        numerator_mat -= 2 * x_e.dot(x_e.T)
+        # arccoshのエラー対策
+        for i in range(self.n_nodes):
+            numerator_mat[i, i] = 0
+        dist_mat = np.arccosh(1 + 2 * numerator_mat / denominator_mat)
+        X = self.R - dist_mat
+        for i in range(self.n_nodes):
+            X[i, i] = 0
+
+        # I_n
+        def sqrt_I_n(beta):
+            return np.sqrt(np.sum(X**2 / ((np.cosh(beta * X / 2.0) * 2)**2)) / (self.n_nodes * (self.n_nodes - 1)))
+
+        # I
+        def sqrt_I(sigma):
+            denominator = self.integral_sinh(self.n_dim - 1)
+            numerator_1 = lambda r: (r**2) * ((torch.exp(self.sigma * (r - self.R)) + torch.exp(-self.sigma * (r + self.R)))**2) * (
+                (torch.exp(self.sigma * (r - self.R)) - torch.exp(-self.sigma * (r + self.R)))**(self.n_dim - 3))
+            first_term = ((self.n_dim - 1)**2) * \
+                integrate.quad(numerator_1, 0, self.R)[0] / denominator
+
+            numerator_2 = lambda r: r * (torch.exp(self.sigma * (r - self.R)) + torch.exp(-self.sigma * (r + self.R))) * (
+                (torch.exp(self.sigma * (r - self.R)) - torch.exp(-self.sigma * (r + self.R)))**(self.n_dim - 2))
+            second_term = (
+                (self.n_dim - 1) * integrate.quad(numerator_2, 0, self.R)[0] / denominator)**2
+
+            return torch.sqrt(first_term - second_term)
+
+        return 0.5*(np.log(self.n_nodes)+np.log(self.n_nodes-1)-np.log(4*np.pi))+np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5*(np.log(self.n_nodes)-np.log(2*np.pi))+np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
 
 
 def plot_figure(adj_mat, table, path):
@@ -425,23 +557,31 @@ if __name__ == '__main__':
     # データセット作成
     params_dataset = {
         'n_nodes': 128,
-        'n_dim': 2,
+        'n_dim': 5,
         'R': 10,
-        'sigma': 1.0,
-        'beta': 0.5  # Tが小さすぎると最適化のときにinfが増えてバグる。
+        'sigma': 0.5,
+        'beta': 0.2  # Tが小さすぎると最適化のときにinfが増えてバグる。
     }
 
     # パラメータ
-    burn_epochs = 200
-    burn_batch_size = 256
-    learning_rate = 10.0 * burn_batch_size / 32  # batchサイズに対応して学習率変更
+    burn_epochs = 500
+    burn_batch_size = 12
+    n_max_positives = 2
+    n_max_negatives = 20
+    learning_rate = 10.0 * \
+        (burn_batch_size * (n_max_positives + n_max_negatives)) / \
+        32  # batchサイズに対応して学習率変更
+    sigma_max = 1.0
+    sigma_min = 0.001
+    beta_min = 0.1
+    beta_max = 10.0
     # それ以外
     loader_workers = 16
     print("loader_workers: ", loader_workers)
     shuffle = True
     sparse = False
 
-    model_n_dim = 2
+    model_n_dim = 4
 
     result = pd.DataFrame()
     # 隣接行列
@@ -452,29 +592,37 @@ if __name__ == '__main__':
         sigma=params_dataset['sigma'],
         beta=params_dataset['beta']
     )
-    train, val = create_dataset(
-        adj_mat=adj_mat,
-        n_max_positives=5,
-        n_max_negatives=20,
-        val_size=0.02
-    )
+    # train, val = create_dataset(
+    #     adj_mat=adj_mat,
+    #     n_max_positives=5,
+    #     n_max_negatives=50,
+    #     val_size=0.02
+    # )
 
-    print(len(val))
+    # print(len(val))
 
     # 平均次数が少なくなるように手で調整する用
     print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
-    u_adj_mat = get_unobserved(adj_mat, train)
+    # u_adj_mat = get_unobserved(adj_mat, train)
 
     print("model_n_dim:", model_n_dim)
     # burn-inでの処理
     dataloader = DataLoader(
-        Graph(train),
+        NegGraph(adj_mat, n_max_positives, n_max_negatives),
         shuffle=shuffle,
         batch_size=burn_batch_size,
         num_workers=loader_workers,
         pin_memory=True
     )
+
+    # dataloader = DataLoader(
+    #     Graph(train),
+    #     shuffle=shuffle,
+    #     batch_size=burn_batch_size,
+    #     num_workers=loader_workers,
+    #     pin_memory=True
+    # )
 
     # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
     # 平均次数とかから逆算できる気がする。
@@ -488,14 +636,15 @@ if __name__ == '__main__':
         sparse=sparse
     )
     # 最適化関数。
-    rsgd = RSGD(model.parameters(),
-                learning_rate=learning_rate,
-                R=params_dataset['R'],
-                sigma_max=1.0,
-                sigma_min=0.001,
-                beta_max=10.0,
-                beta_min=0.1
-                )
+    rsgd = RSGD(
+        model.parameters(),
+        learning_rate=learning_rate,
+        R=params_dataset['R'],
+        sigma_max=sigma_max,
+        sigma_min=sigma_min,
+        beta_max=beta_max,
+        beta_min=beta_min
+    )
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # device="cpu"
@@ -508,10 +657,12 @@ if __name__ == '__main__':
     start = time.time()
 
     for epoch in range(burn_epochs):
-        if epoch != 0 and epoch % 25 == 0:  # 10 epochごとに学習率を減少
+        if epoch != 0 and epoch % 50 == 0:  # 10 epochごとに学習率を減少
             rsgd.param_groups[0]["learning_rate"] /= 5
         losses = []
         for pairs, labels in dataloader:
+            pairs = pairs.reshape((-1, 2))
+            labels = labels.reshape(-1)
 
             pairs = pairs.to(device)
             labels = labels.to(device)
@@ -530,17 +681,50 @@ if __name__ == '__main__':
     elapsed_time = time.time() - start
     print("elapsed_time:{0}".format(elapsed_time) + "[sec]")
 
+    # 尤度計算
+
+    data, _ = create_dataset(
+        adj_mat=adj_mat,
+        n_max_positives=9999999999,
+        n_max_negatives=9999999999,
+        val_size=0.00
+    )
+
+    print(data.shape)
+
+    dataloader_all = DataLoader(
+        Graph(data),
+        shuffle=shuffle,
+        batch_size=burn_batch_size,
+        num_workers=loader_workers,
+        pin_memory=True
+    )
+
     # -2*log(p)の計算
-    basescore = 0
-    for pairs, labels in dataloader:
-        # print(model(pairs, labels))
+    basescore_y_and_z = 0
+    basescore_y_given_z = 0
+    for pairs, labels in dataloader_all:
         pairs = pairs.to(device)
         labels = labels.to(device)
 
-        loss = model(pairs, labels).sum().item()
-        basescore += 2 * loss
+        basescore_y_and_z += model(pairs, labels).sum().item()
+        basescore_y_given_z += model.y_given_z(pairs, labels).sum().item()
 
-    print(basescore)
+    AIC_naive = basescore_y_given_z + \
+        params_dataset['n_nodes'] * params_dataset['n_dim']
+    BIC_naive = basescore_y_given_z + (params_dataset['n_nodes'] * params_dataset['n_dim'] / 2) * (
+        np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
 
-    plot_figure(adj_mat, model.get_poincare_table(), "embedding.png")
-    plot_figure(adj_mat, x_e, "original.png")
+    pc_first, pc_second = model.get_PC(
+        sigma_max, sigma_min, beta_max, beta_min)
+    # print(pc_first, pc_second)
+    DNML_codelength=basescore_y_and_z+pc_first+pc_second
+
+    print(basescore_y_and_z)
+    print(basescore_y_given_z)
+    print("DNML:",DNML_codelength)
+    print("AIC naive:",AIC_naive)
+    print("BIC_naive:",BIC_naive)
+
+    # plot_figure(adj_mat, model.get_poincare_table(), "embedding.png")
+    # plot_figure(adj_mat, x_e, "original.png")
