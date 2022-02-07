@@ -168,51 +168,57 @@ def create_dataset(
 
 if __name__ == '__main__':
 
-    params_adj_mat = {
-        'n_nodes': 32000,
-        'n_dim': 5,
-        'R': 10,
-        'sigma': 1,
-        'beta': 0.5
-    }
-    adj_mat, x_e = hyperbolic_geometric_graph(
-        n_nodes=params_adj_mat["n_nodes"],
-        n_dim=params_adj_mat["n_dim"],
-        R=params_adj_mat["R"],
-        sigma=params_adj_mat["sigma"],
-        beta=params_adj_mat["beta"]
-    )
+    n_nodes_list=[100, 200, 400, 800, 1600]
+    n_graphs=10
 
-    # params_dataset = {
-    #     "n_max_positives": params_adj_mat['n_nodes'],  # 全てをサンプリング
-    #     "n_max_negatives": params_adj_mat['n_nodes'],  # 全てをサンプリング
-    #     "val_size": 0
-    # }
-    params_dataset = {
-        "n_max_positives": 10,
-        "n_max_negatives": 100,
-        "val_size": 0
-    }
-    train, val = create_dataset(
-        adj_mat,
-        params_dataset["n_max_positives"],
-        params_dataset["n_max_negatives"],
-        params_dataset["val_size"]
-    )
+    for n_nodes in n_nodes_list:
+        for n_graph in range(n_graphs):
 
-    graph_dict = {
-        "params_adj_mat": params_adj_mat,
-        "adj_mat": adj_mat,
-        "params_dataset": params_dataset,
-        "train": train,
-        "val": val
-    }
+            params_adj_mat = {
+                'n_nodes': n_nodes,
+                'n_dim': 50,
+                'R': 10,
+                'sigma': 0.1,
+                'beta': 0.3
+            }
+            adj_mat, x_e = hyperbolic_geometric_graph(
+                n_nodes=params_adj_mat["n_nodes"],
+                n_dim=params_adj_mat["n_dim"],
+                R=params_adj_mat["R"],
+                sigma=params_adj_mat["sigma"],
+                beta=params_adj_mat["beta"]
+            )
 
-    # 平均次数が少なくなるように手で調整する用
-    print('average degree:', np.sum(adj_mat) / len(adj_mat))
-    print('# of data in train:', len(train))
-    print('# of data in val:', len(val))
+            # params_dataset = {
+            #     "n_max_positives": params_adj_mat['n_nodes'],  # 全てをサンプリング
+            #     "n_max_negatives": params_adj_mat['n_nodes'],  # 全てをサンプリング
+            #     "val_size": 0
+            # }
+            # params_dataset = {
+            #     "n_max_positives": 10,
+            #     "n_max_negatives": 100,
+            #     "val_size": 0
+            # }
+            # train, val = create_dataset(
+            #     adj_mat,
+            #     params_dataset["n_max_positives"],
+            #     params_dataset["n_max_negatives"],
+            #     params_dataset["val_size"]
+            # )
 
-    os.makedirs('dataset/dim_' + str(params_adj_mat['n_dim']), exist_ok=True)
-    np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
-        params_adj_mat['n_nodes']) + '.npy', graph_dict)
+            graph_dict = {
+                "params_adj_mat": params_adj_mat,
+                "adj_mat": adj_mat
+                # "params_dataset": params_dataset,
+                # "train": train,
+                # "val": val
+            }
+
+            # 平均次数が少なくなるように手で調整する用
+            print('average degree:', np.sum(adj_mat) / len(adj_mat))
+            # print('# of data in train:', len(train))
+            # print('# of data in val:', len(val))
+
+            os.makedirs('dataset/dim_' + str(params_adj_mat['n_dim']), exist_ok=True)
+            np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
+                params_adj_mat['n_nodes'])+ '_' + str(n_graph) + '.npy', graph_dict)

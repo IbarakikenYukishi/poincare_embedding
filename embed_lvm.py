@@ -116,8 +116,8 @@ class NegGraph(Dataset):
         idx_negatives = np.where(self._adj_mat[i, :] == 0)[0]
         idx_positives = np.random.permutation(idx_positives)
         idx_negatives = np.random.permutation(idx_negatives)
-        n_positives = min(len(idx_positives), n_max_positives)
-        n_negatives = min(len(idx_negatives), n_max_negatives)
+        n_positives = min(len(idx_positives), self.n_max_positives)
+        n_negatives = min(len(idx_negatives), self.n_max_negatives)
 
         # node iを固定した上で、positiveなnode jを対象とする。それに対し、
         for j in idx_positives[0:n_positives]:
@@ -126,8 +126,8 @@ class NegGraph(Dataset):
         for j in idx_negatives[0:n_negatives]:
             data.append((i, j, 0))  # negative sample
 
-        if n_positives + n_negatives < n_max_positives + n_max_negatives:
-            rest = n_max_positives + n_max_negatives - \
+        if n_positives + n_negatives < self.n_max_positives + self.n_max_negatives:
+            rest = self.n_max_positives + self.n_max_negatives - \
                 (n_positives + n_negatives)
             rest_idx = np.append(
                 idx_positives[n_positives:], idx_negatives[n_negatives:])
@@ -139,13 +139,8 @@ class NegGraph(Dataset):
 
             rest_data = np.random.permutation(rest_data)
 
-            # print(rest_data)
-
             for datum in rest_data[:rest]:
-                # print(datum)
                 data.append((i, datum[0], datum[1]))
-
-            # print(data)
 
         data = np.random.permutation(data)
 
@@ -153,47 +148,6 @@ class NegGraph(Dataset):
 
         # ノードとラベルを返す。
         return data[:, 0:2], data[:, 2]
-
-
-# class SamplingGraph(Dataset):
-
-#     def __init__(
-#         self,
-#         adj_mat,
-#         n_max_data=1100,
-#         positive_size=1 / 2,  # 一様にしないという手もある。
-#     ):
-#         self.adj_mat = deepcopy(adj_mat)
-#         self.n_nodes = self.adj_mat.shape[0]
-#         for i in range(self.n_nodes):
-#             self.adj_mat[i, 0:i + 1] = -1
-#         # print(self.adj_mat)
-#         # 今まで観測されていないデータからのみノードの組をサンプルをする。
-#         data_unobserved = np.array(np.where(self.adj_mat != -1)).T
-#         n_data = min(n_max_data, len(data_unobserved))
-#         self.n_possibles = 2 * len(data_unobserved)
-#         data_sampled = np.random.choice(
-#             np.arange(len(data_unobserved)), size=n_data, replace=False)
-#         data_sampled = data_unobserved[data_sampled, :]
-#         # ラベルを人工的に作成する。
-#         labels = np.zeros(n_data)
-#         labels[0:int(n_data * positive_size)] = 1
-#         # 連結してデータとする。
-#         self.data = np.concatenate(
-#             [data_sampled, labels.reshape((-1, 1))], axis=1)
-#         self.data = torch.Tensor(self.data).long()
-#         self.n_items = len(self.data)
-
-#     def __len__(self):
-#         # データの長さを返す関数
-#         return self.n_items
-
-#     def __getitem__(self, i):
-#         # ノードとラベルを返す。
-#         return self.data[i, 0:2], self.data[i, 2]
-
-#     def get_all_data(self):
-#         return self.data[:, 0:2], self.data[:, 2], self.n_possibles
 
 
 class RSGD(optim.Optimizer):
@@ -209,7 +163,8 @@ class RSGD(optim.Optimizer):
         sigma_max,
         sigma_min,
         beta_max,
-        beta_min
+        beta_min,
+        device
     ):
         R_e = np.sqrt((np.cosh(R) - 1) / (np.cosh(R) + 1))  # 直交座標系での最適化の範囲
         defaults = {
@@ -218,7 +173,8 @@ class RSGD(optim.Optimizer):
             "sigma_max": sigma_max,
             "sigma_min": sigma_min,
             "beta_max": beta_max,
-            "beta_min": beta_min
+            "beta_min": beta_min,
+            "device": device
         }
         super().__init__(params, defaults=defaults)
 
@@ -281,7 +237,7 @@ class RSGD(optim.Optimizer):
                 h_2 = 1 - p_norm**2
                 k = h_2 / (2 * torch.sqrt(torch.cosh(Delta) + 1)) * \
                     torch.sinc(
-                        Delta / (1.0j * torch.Tensor([np.pi])))  # sincを書く
+                        Delta / (1.0j * torch.Tensor([np.pi]).to(group["device"])))  # sincを書く
                 k = k.real
                 t_2 = 2 + mu * (1 + p_norm**2) - 2 * (F**2) * (k**2)
                 xi = (-F * k) * (t_2 - 2 * mu * (p_norm**2) + 2 * (F**2) * (k**2)) - \
@@ -295,19 +251,6 @@ class RSGD(optim.Optimizer):
                     1 - 4 * (p_norm**2) * mu * (xi**2) + 4 * (F**2) * (k**2) * (xi**2)))) * delta
                 update += (2 * h_2 * mu * (xi**2) / (1 + torch.sqrt(1 - 4 * (p_norm**2)
                                                                     * mu * (xi**2) + 4 * (F**2) * (k**2) * (xi**2)))) * torch.clone(p.data)
-                # print(update)
-                # print(p_update)
-                # print(p_norm.shape)
-                # print(d.shape)
-                # print(delta.shape)
-                # print(Delta.shape)
-                # print(F.shape)
-                # print(mu.shape)
-                # print(h_2.shape)
-                # print(k.shape)
-                # print(t_2.shape)
-                # print(xi.shape)
-                # raise ValueError
 
                 # 発散したところなどを補正
                 is_nan_inf = torch.isnan(update) | torch.isinf(update)
@@ -341,6 +284,7 @@ class Poincare(nn.Module):
         sigma,
         init_range=0.01,
         sparse=True,
+        device="cpu"
     ):
         super().__init__()
         self.n_nodes = n_nodes
@@ -349,6 +293,7 @@ class Poincare(nn.Module):
         self.sigma = nn.Parameter(torch.tensor(sigma))
         self.R = R
         self.table = nn.Embedding(n_nodes, n_dim, sparse=sparse)
+        self.device = device
 
         self.I_D = torch.zeros(self.n_dim - 1)  # 0番目は空
         for j in range(1, self.n_dim - 1):
@@ -386,8 +331,10 @@ class Poincare(nn.Module):
         # zを固定した下でのyのロス
         loss = torch.where(
             loss == 1,
-            torch.logaddexp(torch.tensor([0]), self.beta * (dist - self.R)),
-            torch.logaddexp(torch.tensor([0]), -self.beta * (dist - self.R))
+            torch.logaddexp(torch.tensor([0.0]).to(
+                self.device), self.beta * (dist - self.R)),
+            torch.logaddexp(torch.tensor([0.0]).to(
+                self.device), -self.beta * (dist - self.R))
         )
 
         # z自体のロス
@@ -395,35 +342,31 @@ class Poincare(nn.Module):
         def latent_lik(x):
             # 座標変換
             # 半径方向
-            r = h_dist(x, torch.Tensor([[0.0]]))
+            r = h_dist(x, torch.Tensor([[0.0]]).to(self.device))
             x_ = x**2
             x_ = torch.cumsum(
                 x_[:, torch.arange(self.n_dim - 1, -1, -1)], dim=1)  # j番目がDからD-jの和
             x_ = x_[:, torch.arange(self.n_dim - 1, -1, -1)]  # j番目がDからj+1の和
-            x_ = torch.max(torch.Tensor([[0.000001]]), x_)
+            x_ = torch.max(torch.Tensor([[0.000001]]).to(self.device), x_)
             # 角度方向
-            sin_theta = torch.zeros((x.shape[0], self.n_dim - 1))
+            sin_theta = torch.zeros(
+                (x.shape[0], self.n_dim - 1)).to(self.device)
             for j in range(1, self.n_dim - 1):
                 sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
 
             # rの尤度
             lik = -(self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * self.sigma *
-                                                               r) + 0.00001) + self.sigma * r - torch.log(torch.Tensor([2])))
+                                                               r) + 0.00001) + self.sigma * r - torch.log(torch.Tensor([2]).to(self.device)))
 
             # rの正規化項
             log_C_D = torch.Tensor([(self.n_dim - 1) * self.sigma *
-                                    self.R - (self.n_dim - 1) * np.log(2)])  # 支配項
+                                    self.R - (self.n_dim - 1) * np.log(2)]).to(self.device)  # 支配項
             # のこり。計算はwikipediaの再帰計算で代用してもいいかも
             # https://en.wikipedia.org/wiki/List_of_integrals_of_hyperbolic_functions
-
-            C = torch.Tensor([self.integral_sinh(self.n_dim - 1)])
-            log_C_D = log_C_D + torch.Tensor(torch.log(C))
-
-            # print(log_C_D)
-
+            C = torch.Tensor(
+                [self.integral_sinh(self.n_dim - 1)]).to(self.device)
+            log_C_D = log_C_D + torch.log(C)
             lik = lik + log_C_D
-
-            # print(lik)
 
             # 角度方向の尤度
             for j in range(1, self.n_dim - 1):
@@ -432,7 +375,7 @@ class Poincare(nn.Module):
                 # 正規化項を足す
                 lik = lik + torch.log(self.I_D[j])
 
-            lik = lik + torch.log(2 * torch.Tensor([np.pi]))
+            lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
 
             return lik
 
@@ -459,8 +402,10 @@ class Poincare(nn.Module):
         # zを固定した下でのyのロス
         loss = torch.where(
             loss == 1,
-            torch.logaddexp(torch.tensor([0]), self.beta * (dist - self.R)),
-            torch.logaddexp(torch.tensor([0]), -self.beta * (dist - self.R))
+            torch.logaddexp(torch.tensor([0.0]).to(
+                self.device), self.beta * (dist - self.R)),
+            torch.logaddexp(torch.tensor([0.0]).to(
+                self.device), -self.beta * (dist - self.R))
         )
 
         return loss
@@ -512,7 +457,6 @@ class Poincare(nn.Module):
 
 
 def plot_figure(adj_mat, table, path):
-    # table = net.get_poincare_table()
     # skip padding. plot x y
 
     print(table.shape)
@@ -525,13 +469,7 @@ def plot_figure(adj_mat, table, path):
 
     edges = np.array(np.where(_adj_mat == 1)).T
 
-    # print(edges)
-    # print(table)
-
     for edge in edges:
-        # print(edge)
-        # print(table[edge[0]])
-        # print(table[edge[1]])
         plt.plot(
             table[edge, 0],
             table[edge, 1],
@@ -540,8 +478,6 @@ def plot_figure(adj_mat, table, path):
             alpha=0.5,
         )
     plt.scatter(table[:, 0], table[:, 1])
-
-    # plt.title(path)
     plt.gca().set_xlim(-1, 1)
     plt.gca().set_ylim(-1, 1)
     plt.gca().add_artist(plt.Circle((0, 0), 1, fill=False, edgecolor="black"))
@@ -562,6 +498,7 @@ def CV_HGG(
     sigma_max,
     beta_min,
     beta_max,
+    device,
     k_folds=5,
     loader_workers=16,
     shuffle=True,
@@ -569,12 +506,10 @@ def CV_HGG(
 ):
     data, _ = create_dataset(
         adj_mat=adj_mat,
-        n_max_positives=5,
-        n_max_negatives=50,
+        n_max_positives=n_max_positives,
+        n_max_negatives=n_max_negatives,
         val_size=0.0
     )
-
-    # print(data.shape)
 
     CV_score = 0
 
@@ -592,16 +527,13 @@ def CV_HGG(
         train_index = np.array(train_index).reshape(-1).astype(np.int)
         val_index = np.array(val_index).reshape(-1).astype(np.int)
 
-        # print(train_index)
-        # print(val_index)
-
         train = data[train_index, :]
         val = data[val_index, :]
 
         dataloader = DataLoader(
             Graph(train),
             shuffle=shuffle,
-            batch_size=256,
+            batch_size=burn_batch_size * (n_max_positives + n_max_negatives),
             num_workers=loader_workers,
             pin_memory=True
         )
@@ -612,10 +544,11 @@ def CV_HGG(
             n_nodes=params_dataset['n_nodes'],
             n_dim=model_n_dim,  # モデルの次元
             R=params_dataset['R'],
-            sigma=params_dataset['sigma'],
-            beta=params_dataset['beta'],
+            sigma=1.0,
+            beta=1.0,
             init_range=0.001,
-            sparse=sparse
+            sparse=sparse,
+            device=device
         )
         # 最適化関数。
         rsgd = RSGD(
@@ -625,21 +558,17 @@ def CV_HGG(
             sigma_max=sigma_max,
             sigma_min=sigma_min,
             beta_max=beta_max,
-            beta_min=beta_min
+            beta_min=beta_min,
+            device=device
         )
 
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        # device="cpu"
-        # device = "cuda:0"
         model.to(device)
-        # model=nn.DataParallel(model, device_ids=[0, 1, 2, 3])
 
         loss_history = []
-
         start = time.time()
 
         for epoch in range(burn_epochs):
-            if epoch != 0 and epoch % 50 == 0:  # 10 epochごとに学習率を減少
+            if epoch != 0 and epoch % 25 == 0:  # 10 epochごとに学習率を減少
                 rsgd.param_groups[0]["learning_rate"] /= 5
             losses = []
             for pairs, labels in dataloader:
@@ -669,16 +598,14 @@ def CV_HGG(
         )
 
         # -2*log(p)の計算
-        basescore_y_and_z = 0
-        basescore_y_given_z = 0
         for pairs, labels in dataloader_all:
             pairs = pairs.to(device)
             labels = labels.to(device)
 
             CV_score += model(pairs, labels).sum().item()
-            # basescore_y_given_z += model.y_given_z(pairs, labels).sum().item()
 
     print("CV_score:", CV_score)
+    return CV_score
 
 
 def DNML_HGG(
@@ -694,6 +621,7 @@ def DNML_HGG(
     sigma_max,
     beta_min,
     beta_max,
+    device,
     loader_workers=16,
     shuffle=True,
     sparse=False
@@ -715,10 +643,11 @@ def DNML_HGG(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
-        sigma=params_dataset['sigma'],
-        beta=params_dataset['beta'],
+        sigma=1.0,
+        beta=1.0,
         init_range=0.001,
-        sparse=sparse
+        sparse=sparse,
+        device=device
     )
     # 最適化関数。
     rsgd = RSGD(
@@ -728,21 +657,18 @@ def DNML_HGG(
         sigma_max=sigma_max,
         sigma_min=sigma_min,
         beta_max=beta_max,
-        beta_min=beta_min
+        beta_min=beta_min,
+        device=device
     )
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    # device="cpu"
-    # device = "cuda:0"
     model.to(device)
-    # model=nn.DataParallel(model, device_ids=[0, 1, 2, 3])
 
     loss_history = []
 
     start = time.time()
 
     for epoch in range(burn_epochs):
-        if epoch != 0 and epoch % 50 == 0:  # 10 epochごとに学習率を減少
+        if epoch != 0 and epoch % 25 == 0:  # 10 epochごとに学習率を減少
             rsgd.param_groups[0]["learning_rate"] /= 5
         losses = []
         for pairs, labels in dataloader:
@@ -753,7 +679,6 @@ def DNML_HGG(
             labels = labels.to(device)
 
             rsgd.zero_grad()
-            # print(model(pairs, labels))
             loss = model(pairs, labels).mean()
             loss.backward()
             rsgd.step()
@@ -775,12 +700,10 @@ def DNML_HGG(
         val_size=0.00
     )
 
-    print(data.shape)
-
     dataloader_all = DataLoader(
         Graph(data),
         shuffle=shuffle,
-        batch_size=burn_batch_size*(n_max_negatives+n_max_positives),
+        batch_size=burn_batch_size * (n_max_negatives + n_max_positives),
         num_workers=loader_workers,
         pin_memory=True
     )
@@ -796,13 +719,12 @@ def DNML_HGG(
         basescore_y_given_z += model.y_given_z(pairs, labels).sum().item()
 
     AIC_naive = basescore_y_given_z + \
-        params_dataset['n_nodes'] * model_n_dim
-    BIC_naive = basescore_y_given_z + (params_dataset['n_nodes'] * model_n_dim / 2) * (
+        (params_dataset['n_nodes'] * model_n_dim + 1)
+    BIC_naive = basescore_y_given_z + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
         np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
 
     pc_first, pc_second = model.get_PC(
         sigma_max, sigma_min, beta_max, beta_min)
-    # print(pc_first, pc_second)
     DNML_codelength = basescore_y_and_z + pc_first + pc_second
 
     print("p(y, z; theta):", basescore_y_and_z)
@@ -817,7 +739,7 @@ def DNML_HGG(
 if __name__ == '__main__':
     # データセット作成
     params_dataset = {
-        'n_nodes': 1000,
+        'n_nodes': 100,
         'n_dim': 5,
         'R': 10,
         'sigma': 0.1,
@@ -825,11 +747,11 @@ if __name__ == '__main__':
     }
 
     # パラメータ
-    burn_epochs = 500
-    burn_batch_size = 12
-    n_max_positives = int(params_dataset["n_nodes"]*0.02)
-    n_max_negatives = n_max_positives*10
-    learning_rate = 10.0 * \
+    burn_epochs = 5
+    burn_batch_size = 100
+    n_max_positives = int(params_dataset["n_nodes"] * 0.02)
+    n_max_negatives = n_max_positives * 10
+    learning_rate = 1.0 * \
         (burn_batch_size * (n_max_positives + n_max_negatives)) / \
         32  # batchサイズに対応して学習率変更
     sigma_max = 1.0
@@ -841,6 +763,8 @@ if __name__ == '__main__':
     print("loader_workers: ", loader_workers)
     shuffle = True
     sparse = False
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # 隣接行列
     adj_mat, x_e = hyperbolic_geometric_graph(
@@ -860,10 +784,9 @@ if __name__ == '__main__':
     DNML_codelength_list = []
     AIC_naive_list = []
     BIC_naive_list = []
+    CV_score_list = []
 
     model_n_dims = [2, 3, 4, 5, 6, 7, 8]
-    # true_dims=[5]
-    # n_graphs=1
 
     for model_n_dim in model_n_dims:
         basescore_y_and_z, basescore_y_given_z, DNML_codelength, AIC_naive, BIC_naive = DNML_HGG(
@@ -879,6 +802,7 @@ if __name__ == '__main__':
             sigma_max=sigma_max,
             beta_min=beta_min,
             beta_max=beta_max,
+            device=device,
             loader_workers=16,
             shuffle=True,
             sparse=False
@@ -889,33 +813,33 @@ if __name__ == '__main__':
         AIC_naive_list.append(AIC_naive)
         BIC_naive_list.append(BIC_naive)
 
+        CV_score = CV_HGG(
+            adj_mat=adj_mat,
+            params_dataset=params_dataset,
+            model_n_dim=model_n_dim,
+            burn_epochs=burn_epochs,
+            burn_batch_size=burn_batch_size,
+            n_max_positives=n_max_positives,
+            n_max_negatives=n_max_negatives,
+            learning_rate=learning_rate,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            beta_min=beta_min,
+            beta_max=beta_max,
+            device=device,
+            k_folds=5,
+            loader_workers=16,
+            shuffle=True,
+            sparse=False
+        )
+        CV_score_list.append(CV_score)
+
     result["model_n_dims"] = model_n_dims
     result["DNML_codelength"] = DNML_codelength_list
     result["AIC_naive"] = AIC_naive_list
     result["BIC_naive"] = BIC_naive_list
+    result["CV_score"] = CV_score_list
     result["basescore_y_and_z"] = basescore_y_and_z_list
     result["basescore_y_given_z"] = basescore_y_given_z_list
 
     result.to_csv("result.csv", index=False)
-
-    # CV_HGG(
-    #     adj_mat=adj_mat,
-    #     params_dataset=params_dataset,
-    #     model_n_dim=model_n_dim,
-    #     burn_epochs=burn_epochs,
-    #     burn_batch_size=burn_batch_size,
-    #     n_max_positives=n_max_positives,
-    #     n_max_negatives=n_max_negatives,
-    #     learning_rate=learning_rate,
-    #     sigma_min=sigma_min,
-    #     sigma_max=sigma_max,
-    #     beta_min=beta_min,
-    #     beta_max=beta_max,
-    #     k_folds=5,
-    #     loader_workers=16,
-    #     shuffle=True,
-    #     sparse=False
-    # )
-
-    # plot_figure(adj_mat, model.get_poincare_table(), "embedding.png")
-    # plot_figure(adj_mat, x_e, "original.png")
