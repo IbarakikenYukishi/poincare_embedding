@@ -28,6 +28,15 @@ def connection_prob(d, R, beta):
     return 1 / (1 + beta * np.exp((d - R)))
 
 
+def integral_sin(n, theta):
+    if n == 0:
+        return theta
+    elif n == 1:
+        return 1 - np.cos(theta)
+    else:
+        return -np.cos(theta) * (np.sin(theta)**(n - 1)) / n + ((n - 1) / n) * integral_sin(n - 2, theta)
+
+
 def calc_dist_angle(n_dim, n, div=INTEGRAL_DIV):
     # nは1からn_dim-1となることが想定される。0次元目はr
     if n_dim - 1 == n:
@@ -35,10 +44,11 @@ def calc_dist_angle(n_dim, n, div=INTEGRAL_DIV):
         cum_dens = theta_array / (2 * np.pi)
     else:
         theta_array = np.pi * np.arange(0, div + 1) / div
-        numerator = lambda theta: np.sin(theta)**(n_dim - 1 - n)
+        # numerator = lambda theta: np.sin(theta)**(n_dim - 1 - n)
         cum_dens = []
         for theta in theta_array:
-            cum_dens.append(integrate.quad(numerator, 0, theta)[0])
+            # cum_dens.append(integrate.quad(numerator, 0, theta)[0])
+            cum_dens.append(integral_sin(n_dim - 1 - n, theta))
         cum_dens = np.array(cum_dens) / np.max(cum_dens)
     return theta_array, cum_dens
 
@@ -46,12 +56,26 @@ def calc_dist_angle(n_dim, n, div=INTEGRAL_DIV):
 def calc_dist_r(n_dim, sigma, R, div=INTEGRAL_DIV):
     # n_dimかRが大きくなると現状だと数値積分があまりうまくいかない。divを増やす必要がある。
     # 発散を防ぐために、exp(sigma*R*(n_dim-1))/(2**(n_dim-1))(分子の積分の支配項)で割ってある。
+
+    def integral_sinh(n, r):  # (exp(sigma*R)/2)^(D-1)で割った結果
+        if n == 0:
+            return r * (2 * np.exp(-sigma * R))**(n_dim - 1)
+        elif n == 1:
+            return 1 / sigma * (np.exp(sigma * (r - R)) + np.exp(- sigma * (r + R)) - 2 * np.exp(-sigma * R)) * (2 * np.exp(-sigma * r))**(n_dim - 2)
+        else:
+            ret = 1 / (sigma * n)
+            ret = ret * (np.exp(sigma * (r - R)) - np.exp(-sigma * (r + R))
+                         )**(n - 1) * (np.exp(sigma * (r - R)) + np.exp(-sigma * (r + R)))
+            ret = ret * (2 * np.exp(-sigma * R)
+                         )**(n_dim - 1 - n)
+            return ret - (n - 1) / n * integral_sinh(n - 2, r)
+
     numerator = lambda r: (
         (np.exp(sigma * (r - R)) - np.exp(-sigma * (r + R))))**(n_dim - 1)
     r_array = R * np.arange(0, div + 1) / div
     cum_dens = []
     for r in r_array:
-        cum_dens.append(integrate.quad(numerator, 0, r)[0])
+        cum_dens.append(integral_sinh(n_dim - 1, r))
     cum_dens = np.array(cum_dens) / np.max(cum_dens)
     return r_array, cum_dens
 
@@ -166,18 +190,55 @@ def create_dataset(
     val = data[int(len(data) * (1 - val_size)):]
     return train, val
 
+
+def create_dataset_for_basescore(
+    adj_mat,
+    n_max_samples,
+):
+    # データセットを作成し、trainとvalidationに分ける
+    _adj_mat = deepcopy(adj_mat)
+    n_nodes = _adj_mat.shape[0]
+    for i in range(n_nodes):
+        _adj_mat[i, i] = -1
+    # -1はサンプリング済みの箇所か対角要素
+
+    data = []
+    # print(np.sum(_adj_mat))
+
+    for i in range(n_nodes):
+        idx_samples = np.where(_adj_mat[i, :] != -1)[0]
+        idx_samples = np.random.permutation(idx_samples)
+        n_samples = min(len(idx_samples), n_max_samples)
+
+        # node iを固定した上で、positiveなnode jを対象とする。それに対し、
+        for j in idx_samples[0:n_samples]:
+            data.append((i, j, _adj_mat[i, j]))  # positive sample
+            # data.append((i, j))  # positive sample
+
+        # 隣接行列から既にサンプリングしたものを取り除く
+        # _adj_mat[i, idx_samples[0:n_samples]] = -1
+        # _adj_mat[idx_samples[0:n_samples], i] = -1
+
+    # data = np.random.permutation(data)
+
+    # train = data[0:int(len(data) * (1 - val_size))]
+    # val = data[int(len(data) * (1 - val_size)):]
+    print(np.sum(_adj_mat))
+
+    return data
+
 if __name__ == '__main__':
 
-    n_nodes_list=[100, 200, 400, 800, 1600]
-    n_graphs=10
+    n_nodes_list = [400, 800, 1600, 3200, 6400]
+    n_graphs = 10
 
     for n_nodes in n_nodes_list:
         for n_graph in range(n_graphs):
 
             params_adj_mat = {
                 'n_nodes': n_nodes,
-                'n_dim': 50,
-                'R': 10,
+                'n_dim': 16,
+                'R': np.log(n_nodes) - 0.5,
                 'sigma': 0.1,
                 'beta': 0.3
             }
@@ -219,6 +280,7 @@ if __name__ == '__main__':
             # print('# of data in train:', len(train))
             # print('# of data in val:', len(val))
 
-            os.makedirs('dataset/dim_' + str(params_adj_mat['n_dim']), exist_ok=True)
+            os.makedirs('dataset/dim_' +
+                        str(params_adj_mat['n_dim']), exist_ok=True)
             np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
-                params_adj_mat['n_nodes'])+ '_' + str(n_graph) + '.npy', graph_dict)
+                params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy', graph_dict)
