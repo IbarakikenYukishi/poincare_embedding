@@ -8,20 +8,17 @@ import gc
 import time
 from copy import deepcopy
 from torch.utils.data import DataLoader
-# from datasets import hyperbolic_geometric_sgraph
-# from embed import create_dataset, get_unobserved, Graph, SamplingGraph, RSGD, Poincare, calc_lik_pc_cpu, calc_lik_pc_gpu
 from embed_lvm import CV_HGG, DNML_HGG
 import torch.multiprocessing as multi
 from functools import partial
+import os
 
 
 def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
 
-    for n_graph in range(int(n_graphs * device_idx / n_devices), int(n_graphs * (device_idx + 1) / n_devices)):
-        pass_list = [0, 1, 2, 3, 5, 6, 7]
+    for n_graph in range(n_graphs):
+    # for n_graph in range(int(n_graphs * device_idx / n_devices), int(n_graphs * (device_idx + 1) / n_devices)):
         print(n_graph)
-        if n_graph in pass_list:
-            continue
 
         dataset = np.load('dataset/dim_' + str(n_dim) + '/graph_' + str(n_nodes) + '_' + str(n_graph) +
                           '.npy', allow_pickle='TRUE').item()  # object型なので、itemを付けないと辞書として使えない。
@@ -47,7 +44,6 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         sparse = False
 
         device = "cuda:" + str(device_idx)
-
         # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         # 平均次数が少なくなるように手で調整する用
@@ -124,6 +120,8 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         result["basescore_y_given_z"] = basescore_y_given_z_list
         result["basescore_z"] = basescore_z_list
 
+        os.makedirs("results/", exist_ok=True)
+
         result.to_csv("results/result_" + str(n_dim) + "_" + str(n_nodes) +
                       "_" + str(n_graph) + ".csv", index=False)
 
@@ -140,17 +138,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
 
-    # HGG-5
-    # n_nodes_list = [400, 800, 1600, 3200, 6400]
-    # model_n_dims = [2, 3, 4, 5, 6, 7, 8]
-
-    # HGG-15
-    # n_nodes_list = [400, 800, 1600, 3200, 6400]
-    # model_n_dims = [6, 9, 12, 15, 18, 21, 24]
-
     # HGG-4
-    # n_nodes_list = [400, 800, 1600, 3200, 6400]
-    n_nodes_list = [6400]
+    n_nodes_list = [400, 800, 1600, 3200, 6400]
     model_n_dims = [2, 4, 8, 16, 32, 64]
 
     for n_nodes in n_nodes_list:
