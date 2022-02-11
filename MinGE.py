@@ -111,7 +111,7 @@ def calc_GE(dim_true, n_dim, n_nodes, n_graph, weight_entropy):
 def artificial_dataset(dim_true):
     weight_entropy = 1.0
     # dim_true = 16
-    n_nodes_list = [400]
+    n_nodes_list = [400, 800, 1600, 3200, 6400]
     n_graphs = 10
     n_dim_list = [2, 4, 8, 16, 32, 64]
 
