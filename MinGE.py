@@ -108,17 +108,12 @@ def calc_GE(dim_true, n_dim, n_nodes, n_graph, weight_entropy):
     return H_f + weight_entropy * H_s
 
 
-def artificial_dataset():
+def artificial_dataset(dim_true):
     weight_entropy = 1.0
-    dim_true = 16
-    n_nodes_list = [400, 800, 1600, 3200, 6400]
+    # dim_true = 16
+    n_nodes_list = [400]
     n_graphs = 10
     n_dim_list = [2, 4, 8, 16, 32, 64]
-
-    # dim_true = 15
-    # n_nodes_list = [400, 800, 1600, 3200, 6400]
-    # n_graphs = 10
-    # n_dim_list = [6, 9, 12, 15, 18, 21, 24]
 
     for n_nodes in n_nodes_list:
         print(n_nodes)
@@ -138,17 +133,23 @@ def artificial_dataset():
 
 if __name__ == "__main__":
     weight_entropy = 1.0
+
+    n_dim_true_list = [4, 8, 16]
+
+    for n_dim_true in n_dim_true_list:
+        artificial_dataset(n_dim_true)
+
     n_dim_list = [2, 4, 8, 16, 32, 64, 128]
-    result = pd.DataFrame()
 
-    dataset_name = "ca-AstroPh"
-    # dataset_name = "ca-HepPh"
-    # dataset_name = "ca-CondMat"
-    # dataset_name = "ca-GrQc"
+    dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
 
-    entropy_list = calc_GE_realworld(dataset_name, n_dim_list, weight_entropy)
+    for dataset_name in dataset_name_list:
+        result = pd.DataFrame()
+        entropy_list = calc_GE_realworld(
+            dataset_name, n_dim_list, weight_entropy)
 
-    result["model_n_dims"] = n_dim_list
-    result["MinGE"] = entropy_list
+        result["model_n_dims"] = n_dim_list
+        result["MinGE"] = entropy_list
 
-    result.to_csv("results/" + dataset_name + "/result_MinGE.csv", index=False)
+        result.to_csv("results/" + dataset_name +
+                      "/result_MinGE.csv", index=False)

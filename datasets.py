@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from scipy import integrate
-# from embed import create_dataset
 from copy import deepcopy
 
 np.random.seed(0)
@@ -212,8 +211,7 @@ def create_dataset_for_basescore(
 
         # node iを固定した上で、positiveなnode jを対象とする。それに対し、
         for j in idx_samples[0:n_samples]:
-            data.append((i, j, _adj_mat[i, j]))  # positive sample
-            # data.append((i, j))  # positive sample
+            data.append((i, j, _adj_mat[i, j]))
 
         # 隣接行列から既にサンプリングしたものを取り除く
         # _adj_mat[i, idx_samples[0:n_samples]] = -1
@@ -229,58 +227,38 @@ def create_dataset_for_basescore(
 
 if __name__ == '__main__':
 
+    n_dim_true_list = [4, 8, 16]
     n_nodes_list = [400, 800, 1600, 3200, 6400]
     n_graphs = 10
 
-    for n_nodes in n_nodes_list:
-        for n_graph in range(n_graphs):
+    for n_dim_true in n_dim_true_list:
+        for n_nodes in n_nodes_list:
+            for n_graph in range(n_graphs):
 
-            params_adj_mat = {
-                'n_nodes': n_nodes,
-                'n_dim': 16,
-                'R': np.log(n_nodes) - 0.5,
-                'sigma': 0.1,
-                'beta': 0.3
-            }
-            adj_mat, x_e = hyperbolic_geometric_graph(
-                n_nodes=params_adj_mat["n_nodes"],
-                n_dim=params_adj_mat["n_dim"],
-                R=params_adj_mat["R"],
-                sigma=params_adj_mat["sigma"],
-                beta=params_adj_mat["beta"]
-            )
+                params_adj_mat = {
+                    'n_nodes': n_nodes,
+                    'n_dim': n_dim_true,
+                    'R': np.log(n_nodes) - 0.5,
+                    'sigma': 0.1,
+                    'beta': 0.3
+                }
+                adj_mat, x_e = hyperbolic_geometric_graph(
+                    n_nodes=params_adj_mat["n_nodes"],
+                    n_dim=params_adj_mat["n_dim"],
+                    R=params_adj_mat["R"],
+                    sigma=params_adj_mat["sigma"],
+                    beta=params_adj_mat["beta"]
+                )
 
-            # params_dataset = {
-            #     "n_max_positives": params_adj_mat['n_nodes'],  # 全てをサンプリング
-            #     "n_max_negatives": params_adj_mat['n_nodes'],  # 全てをサンプリング
-            #     "val_size": 0
-            # }
-            # params_dataset = {
-            #     "n_max_positives": 10,
-            #     "n_max_negatives": 100,
-            #     "val_size": 0
-            # }
-            # train, val = create_dataset(
-            #     adj_mat,
-            #     params_dataset["n_max_positives"],
-            #     params_dataset["n_max_negatives"],
-            #     params_dataset["val_size"]
-            # )
+                graph_dict = {
+                    "params_adj_mat": params_adj_mat,
+                    "adj_mat": adj_mat
+                }
 
-            graph_dict = {
-                "params_adj_mat": params_adj_mat,
-                "adj_mat": adj_mat
-                # "params_dataset": params_dataset,
-                # "train": train,
-                # "val": val
-            }
+                # 平均次数が少なくなるように手で調整する用
+                print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
-            # 平均次数が少なくなるように手で調整する用
-            print('average degree:', np.sum(adj_mat) / len(adj_mat))
-            # print('# of data in train:', len(train))
-            # print('# of data in val:', len(val))
-
-            os.makedirs('dataset/dim_' +
-                        str(params_adj_mat['n_dim']), exist_ok=True)
-            np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
-                params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy', graph_dict)
+                os.makedirs('dataset/dim_' +
+                            str(params_adj_mat['n_dim']), exist_ok=True)
+                np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
+                    params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy', graph_dict)
