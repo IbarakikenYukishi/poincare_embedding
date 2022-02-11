@@ -17,7 +17,8 @@ import os
 def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
 
     for n_graph in range(n_graphs):
-    # for n_graph in range(int(n_graphs * device_idx / n_devices), int(n_graphs * (device_idx + 1) / n_devices)):
+        # for n_graph in range(int(n_graphs * device_idx / n_devices),
+        # int(n_graphs * (device_idx + 1) / n_devices)):
         print(n_graph)
 
         dataset = np.load('dataset/dim_' + str(n_dim) + '/graph_' + str(n_nodes) + '_' + str(n_graph) +
