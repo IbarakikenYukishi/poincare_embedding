@@ -24,7 +24,7 @@ def connection_prob(d, R, beta):
     """
     接続確率
     """
-    return 1 / (1 + beta * np.exp((d - R)))
+    return 1 / (1 + (beta / 2.0) * np.exp((d - R)))
 
 
 def integral_sin(n, theta):
@@ -280,100 +280,103 @@ def create_test_for_link_prediction(
     return positive_samples, negative_samples, train_graph, lik_data
 
 
-def integral_sinh(n, n_dim, R, sigma):  # (exp(sigma*R)/2)^(D-1)で割った結果
-    if n == 0:
-        return R * (2 * np.exp(-sigma * R))**(n_dim - 1)
-    elif n == 1:
-        return 1 / sigma * (1 + np.exp(-2 * sigma * R) - 2 * np.exp(-sigma * R)) * (2 * np.exp(-sigma * R))**(n_dim - 2)
-    else:
-        ret = 1 / (sigma * n)
-        ret = ret * (1 - np.exp(-2 * sigma * R)
-                     )**(n - 1) * (1 + np.exp(-2 * sigma * R))
-        ret = ret * (2 * np.exp(-sigma * R)
-                     )**(n_dim - 1 - n)
-        return ret - (n - 1) / n * integral_sinh(n=n - 2, n_dim=n_dim, R=R, sigma=sigma)
-
-
-def calc_likelihood(n_nodes, n_dim, sigma, R):
-
-    x_polar = np.random.uniform(0, 1, (n_nodes))
-    # 逆関数法で点を双曲空間からサンプリング
-    # 双曲空間の意味での極座標で表示
-    val_array, cum_dens = calc_dist_r(n_dim, sigma, R)
-    for j in range(n_nodes):
-        idx = np.max(np.where(cum_dens <= x_polar[j])[0])
-        x_polar[j] = val_array[idx]
-
-    r = x_polar
-
-    print(r)
-
-    sigma_list = np.arange(1, 1000) / 100
-    ret = []
-
-    for sigma_ in sigma_list:
-
-        # rの尤度
-        lik = -(n_dim - 1) * (np.log(1 - np.exp(-2 * sigma_ *
-                                                r) + 0.00001) + sigma_ * r - np.log(2))
-
-        # rの正規化項
-        log_C_D = (n_dim - 1) * sigma_ * R - (n_dim - 1) * np.log(2)  # 支配項
-        # のこり。計算はwikipediaの再帰計算で代用してもいいかも
-        # https://en.wikipedia.org/wiki/List_of_integrals_of_hyperbolic_functions
-        C = integral_sinh(n=n_dim - 1, n_dim=n_dim, R=R, sigma=sigma_)
-        log_C_D = log_C_D + np.log(C)
-        lik = lik + log_C_D
-        ret.append(np.sum(lik))
-
-    plt.plot(sigma_list, ret)
-    plt.savefig("test.png")
-
-
 if __name__ == '__main__':
 
-    calc_likelihood(n_nodes=10, n_dim=3, sigma=1, R=10)
+    # n_dim_true_list = [4, 8, 16, 32, 64]
+    n_dim_true_list = [4, 16, 64]
+    n_nodes_list = [400, 800, 1600, 3200, 6400]
+    n_graphs = 1
 
-    # n_dim_true_list = [8, 16]
-    # n_nodes_list = [400, 800, 1600, 3200, 6400]
-    # n_graphs = 10
+    for n_dim_true in n_dim_true_list:
+        for n_nodes in n_nodes_list:
+            for n_graph in range(n_graphs):
 
-    # for n_dim_true in n_dim_true_list:
-    #     for n_nodes in n_nodes_list:
-    #         for n_graph in range(n_graphs):
+                params_adj_mat = {
+                    'n_nodes': n_nodes,
+                    'n_dim': n_dim_true,
+                    'R': (2 / (n_dim_true - 1)) * np.log(n_nodes),
+                    'sigma': 3,
+                    'beta': 10
+                }
+                adj_mat, x_e = hyperbolic_geometric_graph(
+                    n_nodes=params_adj_mat["n_nodes"],
+                    n_dim=params_adj_mat["n_dim"],
+                    R=params_adj_mat["R"],
+                    sigma=params_adj_mat["sigma"],
+                    beta=params_adj_mat["beta"]
+                )
 
-    #             params_adj_mat = {
-    #                 'n_nodes': n_nodes,
-    #                 'n_dim': n_dim_true,
-    #                 'R': np.log(n_nodes) - 0.5,
-    #                 'sigma': 0.1,
-    #                 'beta': 0.3
-    #             }
-    #             adj_mat, x_e = hyperbolic_geometric_graph(
-    #                 n_nodes=params_adj_mat["n_nodes"],
-    #                 n_dim=params_adj_mat["n_dim"],
-    #                 R=params_adj_mat["R"],
-    #                 sigma=params_adj_mat["sigma"],
-    #                 beta=params_adj_mat["beta"]
-    #             )
+                positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
+                    adj_mat, params_adj_mat)
 
-    #             positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
-    #                 adj_mat, params_adj_mat)
+                graph_dict = {
+                    "params_adj_mat": params_adj_mat,
+                    "adj_mat": adj_mat,
+                    "positive_samples": positive_samples,
+                    "negative_samples": negative_samples,
+                    "train_graph": train_graph,
+                    "lik_data": lik_data,
+                    "x_e": x_e
+                }
 
-    #             graph_dict = {
-    #                 "params_adj_mat": params_adj_mat,
-    #                 "adj_mat": adj_mat,
-    #                 "positive_samples": positive_samples,
-    #                 "negative_samples": negative_samples,
-    #                 "train_graph": train_graph,
-    #                 "lik_data": lik_data,
-    #                 "x_e": x_e
-    #             }
+                # 平均次数が少なくなるように手で調整する用
+                average_degree = np.sum(adj_mat) / len(adj_mat)
+                print('average degree:', average_degree)
 
-    #             # 平均次数が少なくなるように手で調整する用
-    #             print('average degree:', np.sum(adj_mat) / len(adj_mat))
+                # 平均次数が共通しているか見る
+                numerator = lambda theta: np.sin(
+                    theta)**(params_adj_mat["n_dim"] - 2)
+                I_D_1 = integrate.quad(numerator, 0, np.pi)[0]
+                d = params_adj_mat["n_dim"]
+                s = 2 * params_adj_mat["sigma"]
+                tau = (d - 1) / params_adj_mat["beta"]
 
-    #             os.makedirs('dataset/dim_' +
-    #                         str(params_adj_mat['n_dim']), exist_ok=True)
-    #             np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
-    # params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy', graph_dict)
+                if tau < 1:
+                    # nu = params_adj_mat[
+                    #     "n_nodes"]**(1.5 - 0.5 * d)
+                    nu = 1
+                    exp_1 = nu * (2**(d - 1)) / ((d - 1) * I_D_1)
+                    exp_1 *= (s / (s - 1))**2
+                    exp_1 *= np.pi * tau / np.sin(np.pi * tau)
+                    print('expected degree in tau<1 regime:', exp_1)
+                    sigma = 0.5 * \
+                        np.sqrt((d - 1) * I_D_1 * average_degree *
+                                np.sin(np.pi * tau))
+                    sigma /= np.sqrt((d - 1) * I_D_1 * average_degree * np.sin(
+                        np.pi * tau)) - (2**((d - 1) / 2)) * np.sqrt(np.pi * tau * nu)
+                    print('estimated sigma:', sigma)
+
+                elif tau == 1:
+                    # nu = params_adj_mat[
+                    #     "n_nodes"]**(1.5 - 0.5 * d)
+                    nu = 1
+                    exp_2 = nu * (2**(d - 1)) / ((d - 1) * I_D_1)
+                    exp_2 *= (s / (s - 1))**2
+                    exp_2 *= np.log(1 + ((np.pi / 2)**(d - 1)) *
+                                    np.exp(0.5 * (d - 1) * params_adj_mat["R"]))
+                    print('expected degree in tau=1 regime:', exp_2)
+                    sigma = 0.5 * np.sqrt((d - 1) * I_D_1 * average_degree)
+                    sigma /= np.sqrt((d - 1) * I_D_1 * average_degree) - 2**((d - 1) / 2) * np.sqrt(
+                        nv * np.log(1 + ((np.pi / 2)**(d - 1)) * np.exp(0.5 * (d - 1) * params_adj_mat["R"])))
+                    print('estimated sigma:', sigma)
+
+                elif tau > 1:
+                    # nu = params_adj_mat[
+                    #     "n_nodes"]**(1 - params_adj_mat["beta"] / 2)
+                    nu = 1 - 1 / tau
+                    exp_3 = nu * (2**(d - 1)) / ((d - 1) * I_D_1)
+                    exp_3 *= (np.pi / 2)**(1 - 1 / tau)
+                    exp_3 *= (s**2) * (tau**3) / ((tau - 1) * (s * tau - 1)**2)
+                    print('expected degree in tau>1 regime:', exp_3)
+                    sigma = 0.5 * \
+                        np.sqrt((2**(1 - 1 / tau)) * (tau - 1) *
+                                (d - 1) * I_D_1 * average_degree)
+                    sigma /= tau * np.sqrt((2**(1 - 1 / tau)) * (tau - 1) * (d - 1) * I_D_1 * average_degree) - (
+                        2**(d / 2)) * np.sqrt(np.pi**(1 - 1 / tau) * (tau**3) * nu)
+                    print('estimated sigma:', sigma)
+
+                # os.makedirs('dataset/dim_' +
+                #             str(params_adj_mat['n_dim']), exist_ok=True)
+                # np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
+                # params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy',
+                # graph_dict)

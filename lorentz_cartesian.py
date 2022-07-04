@@ -23,6 +23,8 @@ import time
 from torch import Tensor
 from scipy import integrate
 from sklearn import metrics
+import math
+from scipy import stats
 
 np.random.seed(0)
 
@@ -36,19 +38,6 @@ plt.style.use("ggplot")
 
 def arcosh(x):
     return torch.log(x + torch.sqrt(x - 1) * torch.sqrt(x + 1))
-
-
-def create_prob_matrix(x_e, n_nodes, R, beta):
-    prob_mat = np.zeros((n_nodes, n_nodes))
-    for i in range(n_nodes):
-        for j in range(i + 1, n_nodes):
-            distance = h_dist(x_e[i].reshape((1, -1)),
-                              x_e[j].reshape((1, -1)))[0]
-            prob = connection_prob(distance, R, beta)
-            prob_mat[i, j] = prob
-            prob_mat[j, i] = prob
-
-    return prob_mat
 
 
 def get_unobserved(
@@ -150,6 +139,90 @@ class NegGraph(Dataset):
         return data[:, 0:2], data[:, 2]
 
 
+# class RSGD(optim.Optimizer):
+#     """
+#     Riemaniann Stochastic Gradient Descentを行う関数。
+#     """
+
+#     def __init__(
+#         self,
+#         params,
+#         lr_embeddings,
+#         lr_beta,
+#         lr_sigma,
+#         R,
+#         sigma_max,
+#         sigma_min,
+#         beta_max,
+#         beta_min,
+#         device
+#     ):
+#         defaults = {
+#             "lr_embeddings": lr_embeddings,
+#             "lr_beta": lr_beta,
+#             "lr_sigma": lr_sigma,
+#             'R': R,
+#             "sigma_max": sigma_max,
+#             "sigma_min": sigma_min,
+#             "beta_max": beta_max,
+#             "beta_min": beta_min,
+#             "device": device
+#         }
+#         super().__init__(params, defaults=defaults)
+
+#     def step(self):
+#         for group in self.param_groups:
+
+#             # betaとsigmaの更新
+#             beta = group["params"][0]
+#             sigma = group["params"][1]
+
+#             beta_update = beta.data - \
+#                 group["lr_beta"] * beta.grad.data
+#             beta_update = max(beta_update, group["beta_min"])
+#             beta_update = min(beta_update, group["beta_max"])
+#             if not math.isnan(beta_update):
+#                 beta.data.copy_(torch.tensor(beta_update))
+
+#             sigma_update = sigma.data - \
+#                 group["lr_sigma"] * sigma.grad.data
+#             sigma_update = max(sigma_update, group["sigma_min"])
+#             sigma_update = min(sigma_update, group["sigma_max"])
+#             if not math.isnan(sigma_update):
+#                 sigma.data.copy_(torch.tensor(sigma_update))
+
+
+
+#             # print(beta)
+#             # print(sigma)
+
+#             # うめこみの更新
+#             for p in group["params"][2:]:
+#                 if p.grad is None:
+#                     continue
+#                 B, D = p.size()
+#                 gl = torch.eye(D, device=p.device, dtype=p.dtype)
+#                 gl[0, 0] = -1
+#                 grad_norm = torch.norm(p.grad.data)
+#                 grad_norm = torch.where(
+#                     grad_norm > 1, grad_norm, torch.tensor(1.0, device=p.device))
+#                 # only normalize if global grad_norm is more than 1
+#                 h = (p.grad.data / grad_norm) @ gl
+#                 proj = (
+#                     h
+#                     + (
+#                         lorentz_scalar_product(p, h)
+#                     ).unsqueeze(1)
+#                     * p
+#                 )
+#                 update = exp_map(p, -group["lr_embeddings"] * proj)
+#                 is_nan_inf = torch.isnan(update) | torch.isinf(update)
+#                 update = torch.where(is_nan_inf, p, update)
+#                 # We've found that the performance sometimes deteriorates when we optimize z over the sphere radius R
+#                 # Thus, we optimize embeddings in radius R*0.9
+#                 update = set_dim0(update, group["R"] * 1.00)
+#                 p.data.copy_(update)
+
 class RSGD(optim.Optimizer):
     """
     Riemaniann Stochastic Gradient Descentを行う関数。
@@ -162,127 +235,161 @@ class RSGD(optim.Optimizer):
         lr_beta,
         lr_sigma,
         R,
+        k_hat,
+        n_dim,
         sigma_max,
         sigma_min,
         beta_max,
         beta_min,
         device
     ):
-        R_e = np.sqrt((np.cosh(R) - 1) / (np.cosh(R) + 1))  # 直交座標系での最適化の範囲
         defaults = {
             "lr_embeddings": lr_embeddings,
             "lr_beta": lr_beta,
             "lr_sigma": lr_sigma,
-            'R_e': R_e,
+            'R': R,
             "sigma_max": sigma_max,
             "sigma_min": sigma_min,
             "beta_max": beta_max,
             "beta_min": beta_min,
             "device": device
         }
+        self.k_hat = k_hat
+        self.n_dim = n_dim
+
+        self.I_D = torch.zeros(self.n_dim - 1)  # 0番目は空
+        for j in range(1, self.n_dim - 1):
+            numerator = lambda theta: np.sin(theta)**(self.n_dim - 1 - j)
+            self.I_D[j] = integrate.quad(numerator, 0, np.pi)[0]
+
         super().__init__(params, defaults=defaults)
 
     def step(self):
-        # print(self.param_groups)
         for group in self.param_groups:
-            # print(group["params"].shape)
 
             # betaとsigmaの更新
             beta = group["params"][0]
             sigma = group["params"][1]
 
-            beta_update = beta.data - group["lr_beta"] * beta.grad.data
+            beta_update = beta.data - \
+                group["lr_beta"] * beta.grad.data
             beta_update = max(beta_update, group["beta_min"])
             beta_update = min(beta_update, group["beta_max"])
-            beta.data.copy_(torch.tensor(beta_update))
+            if not math.isnan(beta_update):
+                beta.data.copy_(torch.tensor(beta_update))
 
             sigma_update = sigma.data - \
                 group["lr_sigma"] * sigma.grad.data
             sigma_update = max(sigma_update, group["sigma_min"])
             sigma_update = min(sigma_update, group["sigma_max"])
-            sigma.data.copy_(torch.tensor(sigma_update))
+            if not math.isnan(sigma_update):
+                sigma.data.copy_(torch.tensor(sigma_update))
 
-            # print("beta:", beta)
-            # print("sigma:", sigma)
-            # print("sigma.grad:", sigma.grad)
+
+            # tau = self.n_dim/beta
+            # if beta > self.n_dim:
+            #     sigma = 0.5*torch.sqrt(self.I_D[1]*self.k_hat*torch.sin(np.pi*tau))
+            # elif beta==self.n_dim:
+            #     sigma = 
+            
+
+            # print(beta)
+            # print(sigma)
 
             # うめこみの更新
             for p in group["params"][2:]:
                 if p.grad is None:
                     continue
-
-                d_p = p.grad.data
-
-                # if d_p.is_sparse:
-                #     p_sqnorm = torch.sum(
-                #         p[d_p._indices()[0].squeeze()] ** 2, dim=1,
-                #         keepdim=True
-                #     ).expand_as(d_p._values())
-                #     n_vals = d_p._values() * ((1 - p_sqnorm) ** 2) / 4
-                #     d_p = torch.sparse.DoubleTensor(
-                #         d_p._indices(), n_vals, d_p.size())
-                #     update = p.data - group["learning_rate"] * d_p
-
-                # else:
-                #     # 勾配を元に更新。
-                #     # torch.normがdim=1方向にまとめていることに注意。
-                #     update = torch.clone(p.data)
-                #     update -= group["learning_rate"] * \
-                #         d_p * \
-                #         ((1 - (torch.norm(p, dim=1)**2).reshape((-1, 1)))**2 / 4)
-
-                p_norm = torch.norm(p, dim=1, keepdim=True).reshape((-1, 1))
-                d = group["lr_embeddings"] * d_p * ((1 - p_norm**2)**2 / 4)
-                delta = group["lr_embeddings"] * d_p
-                Delta = torch.sum(delta * d, dim=1, keepdim=True)
-                F = torch.sum(delta * p, dim=1, keepdim=True)
-                mu = torch.cosh(Delta) - 1
-
-                h_2 = 1 - p_norm**2
-                k = h_2 / (2 * torch.sqrt(torch.cosh(Delta) + 1)) * \
-                    torch.sinc(
-                        Delta / (1.0j * torch.Tensor([np.pi]).to(group["device"])))  # sincを書く
-                k = k.real
-                t_2 = 2 + mu * (1 + p_norm**2) - 2 * (F**2) * (k**2)
-                xi = (-F * k) * (t_2 - 2 * mu * (p_norm**2) + 2 * (F**2) * (k**2)) - \
-                    t_2 * torch.sqrt(t_2 - mu * p_norm **
-                                     2 + 2 * (F**2) * (k**2))
-                xi = xi / (4 * (p_norm**2) * mu * (F**2) *
-                           (k**2) - 4 * (F**4) * (k**4) + t_2**2)
-
-                update = torch.clone(p.data)
-                update += (h_2 * k * xi - (2 * h_2 * F * (k**2) * (xi**2)) / (1 + torch.sqrt(
-                    1 - 4 * (p_norm**2) * mu * (xi**2) + 4 * (F**2) * (k**2) * (xi**2)))) * delta
-                update += (2 * h_2 * mu * (xi**2) / (1 + torch.sqrt(1 - 4 * (p_norm**2)
-                                                                    * mu * (xi**2) + 4 * (F**2) * (k**2) * (xi**2)))) * torch.clone(p.data)
-
-                # 発散したところなどを補正
+                B, D = p.size()
+                gl = torch.eye(D, device=p.device, dtype=p.dtype)
+                gl[0, 0] = -1
+                grad_norm = torch.norm(p.grad.data)
+                grad_norm = torch.where(
+                    grad_norm > 1, grad_norm, torch.tensor(1.0, device=p.device))
+                # only normalize if global grad_norm is more than 1
+                h = (p.grad.data / grad_norm) @ gl
+                proj = (
+                    h
+                    + (
+                        lorentz_scalar_product(p, h)
+                    ).unsqueeze(1)
+                    * p
+                )
+                update = exp_map(p, -group["lr_embeddings"] * proj)
                 is_nan_inf = torch.isnan(update) | torch.isinf(update)
                 update = torch.where(is_nan_inf, p, update)
-                # 半径R_eの球に入るように縮小
-                # projection(update, group["R_e"])
-                update.renorm_(p=2, dim=0, maxnorm=group["R_e"])
-                # pのアップデート
+                # We've found that the performance sometimes deteriorates when we optimize z over the sphere radius R
+                # Thus, we optimize embeddings in radius R*0.9
+                update = set_dim0(update, group["R"] * 1.00)
                 p.data.copy_(update)
+
+
+
+def h_dist(u_e, v_e):
+    dists = -lorentz_scalar_product(u_e, v_e)
+    dists = torch.where(dists <= 1, torch.ones_like(dists) + 1e-6, dists)
+    dists = arcosh(dists)
+
+    return dists
+
+
+def lorentz_scalar_product(x, y):
+    # 内積
+    # 2次元の入力を仮定している。
+    # BD, BD -> B
+    m = x * y
+    result = m[:, 1:].sum(dim=1) - m[:, 0]
+    return result
+
+
+def tangent_norm(
+    x
+):
+    return torch.sqrt(lorentz_scalar_product(x, x))
+
+
+def exp_map(
+    x,
+    v
+):
+    # Exponential Map
+    tn = tangent_norm(v).unsqueeze(dim=1)
+    tn_expand = tn.repeat(1, x.size()[-1])
+    result = torch.cosh(tn) * x + torch.sinh(tn) * (v / tn)
+    result = torch.where(tn_expand > 0, result, x)
+    return result
+
+
+def set_dim0(x, R):
+    x[:, 1:] = torch.renorm(x[:, 1:], p=2, dim=0,
+                            maxnorm=np.sinh(R))  # 半径Rの範囲に収めたい
+    # 発散しないように気を使う。
+    x_max = torch.max(torch.abs(x[:, 1:]), dim=1, keepdim=True)[0].double()
+    x_max = torch.where(x_max < 1.0, 1.0, x_max)
+
+    dim0 = x_max * torch.sqrt((1 / x_max)**2 +
+                              ((x[:, 1:] / x_max) ** 2).sum(dim=1, keepdim=True))
+    x[:, 0] = dim0[:, 0]
+    return x
 
 
 def e_dist_2(u_e, v_e):
     return torch.sum((u_e - v_e)**2, dim=1)
 
 
-def h_dist(u_e, v_e):
+def h_dist_p(u_e, v_e):
     ret = 1.0
     ret += (2.0 * e_dist_2(u_e, v_e)) / \
         ((1.0 - e_dist_2(0.0, u_e)) * (1.0 - e_dist_2(0.0, v_e)))
     return arcosh(ret)
 
 
-class Poincare(nn.Module):
+class Lorentz(nn.Module):
 
     def __init__(
         self,
         n_nodes,
-        n_dim,
+        n_dim,  # 次元より1つ多くデータを取る必要があることに注意
         R,
         beta,
         sigma,
@@ -296,7 +403,7 @@ class Poincare(nn.Module):
         self.beta = nn.Parameter(torch.tensor(beta))
         self.sigma = nn.Parameter(torch.tensor(sigma))
         self.R = R
-        self.table = nn.Embedding(n_nodes, n_dim, sparse=sparse)
+        self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
         self.device = device
 
         self.I_D = torch.zeros(self.n_dim - 1)  # 0番目は空
@@ -304,7 +411,23 @@ class Poincare(nn.Module):
             numerator = lambda theta: np.sin(theta)**(self.n_dim - 1 - j)
             self.I_D[j] = integrate.quad(numerator, 0, np.pi)[0]
 
-        nn.init.uniform_(self.table.weight, -init_range, init_range)
+        print("分母:", self.I_D)
+
+        # self.avg_codelength = torch.zeros(self.n_dim - 1)
+
+        # for j in range(1, self.n_dim - 1):
+        #     numerator = lambda theta: -(np.sin(theta)**(self.n_dim - 1 - j) / self.I_D[j].numpy()) * (
+        #         (self.n_dim - 1 - j) * np.log(np.sin(theta)) - np.log(self.I_D[j].numpy()))
+        #     self.avg_codelength[j] = integrate.quad(numerator, 0, np.pi)[0]
+
+        # print("平均符号長:", self.avg_codelength)
+
+        # nn.init.uniform_(self.table.weight, -init_range, init_range)
+        nn.init.normal(self.table.weight, 0, init_range)
+
+        # 0次元目をセット
+        with torch.no_grad():
+            set_dim0(self.table.weight, self.R)
 
     def integral_sinh(self, n):  # (exp(sigma*R)/2)^(D-1)で割った結果
         if n == 0:
@@ -323,23 +446,28 @@ class Poincare(nn.Module):
         self,
         x
     ):
-        # 座標変換
         # 半径方向
-        r = h_dist(x, torch.Tensor([[0.0]]).to(self.device))
-        # print(r[0])
-        # print(x[0, :])
-        x_ = x**2
-        x_ = torch.cumsum(
-            x_[:, torch.arange(self.n_dim - 1, -1, -1)], dim=1)  # j番目がDからD-jの和
-        x_ = x_[:, torch.arange(self.n_dim - 1, -1, -1)]  # j番目がDからj+1の和
-        x_ = torch.max(torch.Tensor([[0.000001]]).to(self.device), x_)
-        # 角度方向
-        sin_theta = torch.zeros(
-            (x.shape[0], self.n_dim - 1)).to(self.device)
-        for j in range(1, self.n_dim - 1):
-            sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
+        # r = arcosh(x[:, 0].reshape((-1, 1))).double()
+        # r = torch.where(r <= 1e-6, 1e-6, r)[:, 0]
 
-        # print(sin_theta[0, :])
+        # x_ = x[:, 1:]
+        r = arcosh(torch.sqrt(1 + (x[:, 1:]**2).sum(dim=1, keepdim=True))).double()
+        r = torch.where(r <= 1e-6, 1e-6, r)[:, 0]
+
+        # print(x[0, :])
+
+        # x_ = x[:, 1:]
+        # # print(x_)
+        # x_ = x_**2
+        # x_ = torch.cumsum(
+        #     x_[:, torch.arange(self.n_dim - 1, -1, -1)], dim=1)  # j番目がDからD-jの和
+        # x_ = x_[:, torch.arange(self.n_dim - 1, -1, -1)]  # j番目がDからj+1の和
+        # x_ = torch.max(torch.Tensor([[0.000001]]).to(self.device), x_)
+        # # 角度方向
+        # sin_theta = torch.zeros(
+        #     (x.shape[0], self.n_dim - 1)).to(self.device)
+        # for j in range(1, self.n_dim - 1):
+        #     sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
 
         # rの尤度
         lik = -(self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * self.sigma *
@@ -357,11 +485,59 @@ class Poincare(nn.Module):
 
         # 角度方向の尤度
         for j in range(1, self.n_dim - 1):
-            # lik = lik-(self.n_dim - 1 - j) * torch.log(x_[:, j])
+            # lik = lik - (self.n_dim - 1 - j) * torch.log(sin_theta[:, j])
+            # 正規化項を足す
+            lik = lik + torch.log(self.I_D[j])
+
+        lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
+
+        # ヤコビアン由来の項
+
+        lik = lik + (self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * r) +
+                                                  0.00001) + r - torch.log(torch.Tensor([2]).to(self.device)))
+
+        lik = lik + torch.log(1 + torch.exp(-2 * r) + 0.00001) + \
+            r - torch.log(torch.Tensor([2]).to(self.device))
+
+        return lik
+
+    def latent_lik_poincare(
+        self,
+        x
+    ):
+        # 座標変換
+        # 半径方向
+        r = h_dist_p(x, torch.Tensor([[0.0]]).to(self.device))
+        x_ = x**2
+        x_ = torch.cumsum(
+            x_[:, torch.arange(self.n_dim - 1, -1, -1)], dim=1)  # j番目がDからD-jの和
+        x_ = x_[:, torch.arange(self.n_dim - 1, -1, -1)]  # j番目がDからj+1の和
+        x_ = torch.max(torch.Tensor([[0.000001]]).to(self.device), x_)
+        # 角度方向
+        sin_theta = torch.zeros(
+            (x.shape[0], self.n_dim - 1)).to(self.device)
+        for j in range(1, self.n_dim - 1):
+            sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
+
+        # rの尤度
+        lik = -(self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * self.sigma *
+                                                           r) + 0.00001) + self.sigma * r - torch.log(torch.Tensor([2]).to(self.device)))
+
+        # rの正規化項
+        log_C_D = torch.Tensor([(self.n_dim - 1) * self.sigma *
+                                self.R - (self.n_dim - 1) * np.log(2)]).to(self.device)  # 支配項
+        # のこり。計算はwikipediaの再帰計算で代用してもいいかも
+        # https://en.wikipedia.org/wiki/List_of_integrals_of_hyperbolic_functions
+        C = torch.Tensor(
+            [self.integral_sinh(self.n_dim - 1)]).to(self.device)
+        log_C_D = log_C_D + torch.log(C)
+        lik = lik + log_C_D
+
+        # 角度方向の尤度
+        for j in range(1, self.n_dim - 1):
             lik = lik - (self.n_dim - 1 - j) * torch.log(sin_theta[:, j])
             # 正規化項を足す
             lik = lik + torch.log(self.I_D[j])
-            # print(torch.log(self.I_D[j])- (self.n_dim - 1 - j) * torch.log(sin_theta[:, j]))
 
         lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
 
@@ -372,25 +548,16 @@ class Poincare(nn.Module):
         pairs,
         labels
     ):
-        # 座標を取得
-        us = self.table(pairs[:, 0])
-        vs = self.table(pairs[:, 1])
-
-        # ロス計算
-        dist = h_dist(us, vs)
-        loss = torch.clone(labels).float()
-        # 数値計算の問題をlogaddexpで回避
-        # zを固定した下でのyのロス
-        loss = torch.where(
-            loss == 1,
-            torch.logaddexp(torch.tensor([0.0]).to(
-                self.device), self.beta * (dist - self.R)),
-            torch.logaddexp(torch.tensor([0.0]).to(
-                self.device), -self.beta * (dist - self.R))
+        # zを与えた下でのyの尤度
+        loss = self.lik_y_given_z(
+            pairs,
+            labels
         )
 
         # z自体のロス
-        # rのロス
+        # 座標を取得
+        us = self.table(pairs[:, 0])
+        vs = self.table(pairs[:, 1])
 
         lik_us = self.latent_lik(us)
         lik_vs = self.latent_lik(vs)
@@ -399,7 +566,7 @@ class Poincare(nn.Module):
 
         return loss
 
-    def y_given_z(
+    def lik_y_given_z(
         self,
         pairs,
         labels
@@ -431,16 +598,20 @@ class Poincare(nn.Module):
 
         return lik_z
 
-    def get_poincare_table(self):
+    def get_lorentz_table(self):
         return self.table.weight.data.cpu().numpy()
+
+    def get_poincare_table(self):
+        table = self.table.weight.data.cpu().numpy()
+        return table[:, 1:] / (
+            table[:, :1] + 1
+        )  # diffeomorphism transform to poincare ball
 
     def calc_probability(
         self,
         samples,
     ):
-        # samples=samples.astype(np.int)
         samples_ = torch.Tensor(samples).to(self.device).long()
-        # print(samples_)
 
         # 座標を取得
         us = self.table(samples_[:, 0])
@@ -449,9 +620,23 @@ class Poincare(nn.Module):
         dist = h_dist(us, vs)
         p = torch.exp(-torch.logaddexp(torch.tensor([0.0]).to(
             self.device), self.beta * (dist - self.R)))
-        # print(p)
+        print(p)
 
         return p.detach().cpu().numpy()
+
+    def calc_dist(
+        self,
+        samples,
+    ):
+        samples_ = torch.Tensor(samples).to(self.device).long()
+
+        # 座標を取得
+        us = self.table(samples_[:, 0])
+        vs = self.table(samples_[:, 1])
+
+        dist = h_dist(us, vs)
+
+        return dist.detach().cpu().numpy()
 
     def get_PC(
         self,
@@ -489,11 +674,15 @@ class Poincare(nn.Module):
             X[i, i] = 0
 
         # I_n
-        def sqrt_I_n(beta):
+        def sqrt_I_n(
+            beta
+        ):
             return np.sqrt(np.sum(X**2 / ((np.cosh(beta * X / 2.0) * 2)**2)) / (n_nodes_sample * (n_nodes_sample - 1)))
 
         # I
-        def sqrt_I(sigma):
+        def sqrt_I(
+            sigma
+        ):
             denominator = self.integral_sinh(self.n_dim - 1)
             numerator_1 = lambda r: (r**2) * ((torch.exp(self.sigma * (r - self.R)) + torch.exp(-self.sigma * (r + self.R)))**2) * (
                 (torch.exp(self.sigma * (r - self.R)) - torch.exp(-self.sigma * (r + self.R)))**(self.n_dim - 3))
@@ -662,30 +851,14 @@ def CV_HGG(
     return CV_score
 
 
-def LinkPrediction(
+def create_test_for_link_prediction(
     adj_mat,
-    params_dataset,
-    model_n_dim,
-    burn_epochs,
-    burn_batch_size,
-    n_max_positives,
-    n_max_negatives,
-    learning_rate,
-    sigma_min,
-    sigma_max,
-    beta_min,
-    beta_max,
-    device,
-    loader_workers=16,
-    shuffle=True,
-    sparse=False
+    params_dataset
 ):
-
-    print("model_n_dim:", model_n_dim)
-
     # testデータとtrain_graphを作成する
     n_total_positives = np.sum(adj_mat) / 2
     n_samples_test = int(n_total_positives * 0.1)
+    n_neg_samples_per_positive = 1  # positive1つに対してnegativeをいくつサンプリングするか
 
     # positive sampleのサンプリング
     train_graph = np.copy(adj_mat)
@@ -711,7 +884,7 @@ def LinkPrediction(
     # negative sampleのサンプリング
     # permutationが遅くなるので直接サンプリングする
     negative_samples = []
-    while len(negative_samples) < n_samples_test:
+    while len(negative_samples) < n_samples_test * n_neg_samples_per_positive:
         u = np.random.randint(0, params_dataset["n_nodes"])
         v = np.random.randint(0, params_dataset["n_nodes"])
         if train_graph[u, v] != 0:
@@ -729,6 +902,39 @@ def LinkPrediction(
         n_max_samples=int((params_dataset["n_nodes"] - 1) * 0.1)
     )
 
+    return positive_samples, negative_samples, train_graph, lik_data
+
+
+def LinkPrediction(
+    adj_mat,
+    train_graph,
+    positive_samples,
+    negative_samples,
+    lik_data,
+    x_lorentz,
+    params_dataset,
+    model_n_dim,
+    burn_epochs,
+    burn_batch_size,
+    n_max_positives,
+    n_max_negatives,
+    lr_embeddings,
+    lr_epoch_10,
+    lr_beta,
+    lr_sigma,
+    sigma_min,
+    sigma_max,
+    beta_min,
+    beta_max,
+    device,
+    loader_workers=16,
+    shuffle=True,
+    sparse=False,
+    calc_groundtruth=False
+):
+
+    print("model_n_dim:", model_n_dim)
+
     print("pos data", len(positive_samples))
     print("neg data", len(negative_samples))
     print("len data", len(lik_data))
@@ -744,7 +950,7 @@ def LinkPrediction(
 
     # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
     # 平均次数とかから逆算できる気がする。
-    model = Poincare(
+    model = Lorentz(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
@@ -757,7 +963,9 @@ def LinkPrediction(
     # 最適化関数。
     rsgd = RSGD(
         model.parameters(),
-        learning_rate=learning_rate,
+        lr_embeddings=lr_embeddings,
+        lr_beta=lr_beta,
+        lr_sigma=lr_sigma,
         R=params_dataset['R'],
         sigma_max=sigma_max,
         sigma_min=sigma_min,
@@ -773,13 +981,11 @@ def LinkPrediction(
     start = time.time()
 
     for epoch in range(burn_epochs):
-        if epoch != 0 and epoch % 30 == 0:  # 10 epochごとに学習率を減少
-            rsgd.param_groups[0]["learning_rate"] /= 5
+        # if epoch != 0 and epoch % 30 == 0:  # 10 epochごとに学習率を減少
+        #     rsgd.param_groups[0]["lr_embeddings"] /= 5
         if epoch == 10:
-            # rsgd.param_groups[0]["learning_rate"] *= 10
-            rsgd.param_groups[0]["learning_rate"] = 10.0 * \
-                (burn_batch_size * (n_max_positives + n_max_negatives)) / \
-                32  # batchサイズに対応して学習率変更
+            # batchサイズに対応して学習率変更
+            rsgd.param_groups[0]["lr_embeddings"] = lr_epoch_10
 
         losses = []
         for pairs, labels in dataloader:
@@ -805,6 +1011,7 @@ def LinkPrediction(
     # 真のデータ数
     n_data = params_dataset['n_nodes'] * (params_dataset['n_nodes'] - 1)
 
+    # サンプリングしたデータのみで尤度を計算する。
     dataloader_all = DataLoader(
         Graph(lik_data),
         shuffle=shuffle,
@@ -821,7 +1028,7 @@ def LinkPrediction(
         labels = labels.to(device)
 
         # basescore_y_and_z += model(pairs, labels).sum().item()
-        basescore_y_given_z += model.y_given_z(pairs, labels).sum().item()
+        basescore_y_given_z += model.lik_y_given_z(pairs, labels).sum().item()
 
     basescore_z = model.z()
 
@@ -837,14 +1044,60 @@ def LinkPrediction(
         sigma_max, sigma_min, beta_max, beta_min, sampling=True)
     DNML_codelength = basescore_y_and_z + pc_first + pc_second
 
-    positive_prob = model.calc_probability(positive_samples)
-    negative_prob = model.calc_probability(negative_samples)
+    # リンク予測の指標計算
+    # positive_prob = model.calc_probability(positive_samples)
+    # negative_prob = model.calc_probability(negative_samples)
+
+    positive_prob = -model.calc_dist(positive_samples)
+    negative_prob = -model.calc_dist(negative_samples)
 
     pred = np.append(positive_prob, negative_prob)
     ground_truth = np.append(np.ones(len(positive_prob)),
                              np.zeros(len(negative_prob)))
 
     AUC = metrics.roc_auc_score(ground_truth, pred)
+
+    if calc_groundtruth:
+
+        # 真の座標でのAUC
+        # 座標を取得
+        us = torch.Tensor(x_lorentz[positive_samples[:, 0], :])
+        vs = torch.Tensor(x_lorentz[positive_samples[:, 1], :])
+
+        dist = h_dist(us, vs)
+        # p_positive = torch.exp(-torch.logaddexp(torch.tensor([0.0]), params_dataset["beta"] * (dist - params_dataset["R"]))).detach().cpu().numpy()
+        p_positive = -dist.detach().cpu().numpy()
+
+        # 座標を取得
+        us = torch.Tensor(x_lorentz[negative_samples[:, 0], :])
+        vs = torch.Tensor(x_lorentz[negative_samples[:, 1], :])
+
+        dist = h_dist(us, vs)
+        # p_negative = torch.exp(-torch.logaddexp(torch.tensor([0.0]), params_dataset["beta"] * (dist - params_dataset["R"]))).detach().cpu().numpy()
+        p_negative = -dist.detach().cpu().numpy()
+
+        pred_g = np.append(p_positive, p_negative)
+        GT_AUC = metrics.roc_auc_score(ground_truth, pred_g)
+        print("GT_AUC:", GT_AUC)
+        gt_r = torch.Tensor(x_lorentz[:, 0])
+        gt_r = torch.max(gt_r, torch.Tensor([1.0 + 0.00001]))
+
+        es_r = torch.Tensor(model.get_lorentz_table()[:, 0])
+        # es_r = torch.max(es_r, torch.Tensor([1.0 + 0.00001]))
+        # es_r = torch.where(es_r <= 1.0+0.00001, torch.Tensor([1.0+0.0001]), es_r)[:, 0]
+
+        print(gt_r)
+        print(es_r)
+
+        gt_r = arcosh(gt_r)
+        es_r = arcosh(es_r)
+
+        correlation, _ = stats.spearmanr(gt_r, es_r)
+        print("Cor:", correlation)
+
+    else:
+        GT_AUC = None
+        correlation = None
 
     print("p(y, z; theta):", basescore_y_and_z)
     print("p(y|z; theta):", basescore_y_given_z)
@@ -854,7 +1107,7 @@ def LinkPrediction(
     print("BIC_naive:", BIC_naive)
     print("AUC:", AUC)
 
-    return basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC
+    return basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation
 
 
 def DNML_HGG(
@@ -891,13 +1144,13 @@ def DNML_HGG(
 
     # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
     # 平均次数とかから逆算できる気がする。
-    model = Poincare(
+    model = Lorentz(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
         sigma=1.0,
         beta=1.0,
-        init_range=0.001,
+        init_range=0.1,
         sparse=sparse,
         device=device
     )
@@ -923,9 +1176,8 @@ def DNML_HGG(
 
     for epoch in range(burn_epochs):
         # if epoch != 0 and epoch % 30 == 0:  # 10 epochごとに学習率を減少
-        #     rsgd.param_groups[0]["lr_embeddings"] /= 5
+            # rsgd.param_groups[0]["lr_embeddings"] /= 5
         if epoch == 10:
-            # rsgd.param_groups[0]["learning_rate"] *= 10
             rsgd.param_groups[0]["lr_embeddings"] = lr_epoch_10
 
         losses = []
@@ -974,7 +1226,7 @@ def DNML_HGG(
         labels = labels.to(device)
 
         basescore_y_and_z += model(pairs, labels).sum().item()
-        basescore_y_given_z += model.y_given_z(pairs, labels).sum().item()
+        basescore_y_given_z += model.lik_y_given_z(pairs, labels).sum().item()
 
     basescore_z = model.z()
 
@@ -994,34 +1246,49 @@ def DNML_HGG(
     print("AIC naive:", AIC_naive)
     print("BIC_naive:", BIC_naive)
 
-    return basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, model.get_poincare_table()
+    return basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, model.get_lorentz_table()
 
 
 if __name__ == '__main__':
     # データセット作成
+    # params_dataset = {
+    #     'n_nodes': 150,
+    #     'n_dim': 16,
+    #     'R': 10,
+    #     'sigma': 0.1,
+    #     'beta': 0.3
+    # }
+
+    filepath = "result_lorentz_cartesian.csv"
+
+    n_nodes = 400
+    R = np.log(n_nodes)
+
+    print("R:", R)
+
     params_dataset = {
-        'n_nodes': 400,
-        'n_dim': 4,
-        'R': np.log(400)-0.5,
-        'sigma': 0.1,
+        'n_nodes': n_nodes,
+        'n_dim': 8,
+        'R': R,
+        'sigma': 1.5,
         'beta': 0.3
     }
 
-    print("R:", np.log(400)-0.5)
-
     # パラメータ
-    burn_epochs = 100
+    burn_epochs = 300
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     n_max_negatives = n_max_positives * 10
-    learning_rate = 10.0 * \
+    lr_embeddings = 0.1
+    lr_epoch_10 = 100.0 * \
         (burn_batch_size * (n_max_positives + n_max_negatives)) / \
         32 / 100  # batchサイズに対応して学習率変更
-    # learning_rate=0.1
+    lr_beta = 0.01
+    lr_sigma = 0.01
     sigma_max = 1.0
     sigma_min = 0.001
     beta_min = 0.1
-    beta_max = 10.0
+    beta_max = 100.0
     # それ以外
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -1039,6 +1306,18 @@ if __name__ == '__main__':
         beta=params_dataset['beta']
     )
 
+    # print(x_e)
+    # 真のローレンツモデルの座標
+    x_lorentz = np.zeros(
+        (params_dataset['n_nodes'], params_dataset['n_dim'] + 1))
+    for i in range(params_dataset['n_nodes']):
+        x_lorentz[i, 0] = (1 + np.sum(x_e[i]**2)) / (1 - np.sum(x_e[i]**2))
+        x_lorentz[i, 1:] = 2 * x_e[i] / (1 - np.sum(x_e[i]**2))
+
+    # print(x_lorentz)
+
+    # print(x_lorentz[:, 1:]/(x_lorentz[:, :1]+1))
+
     # 平均次数が少なくなるように手で調整する用
     print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
@@ -1052,30 +1331,22 @@ if __name__ == '__main__':
     AIC_naive_list = []
     BIC_naive_list = []
     CV_score_list = []
+    AUC_list = []
+    GT_AUC_list = []
+    Cor_list = []
 
     model_n_dims = [2, 4, 8, 16, 32, 64]
-    # model_n_dims = [32, 64]
+    # model_n_dims = [64]
+
+    # model_n_dims = [64]
+
+    positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
+        adj_mat=adj_mat,
+        params_dataset=params_dataset
+    )
 
     for model_n_dim in model_n_dims:
-        basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive = DNML_HGG(
-            adj_mat=adj_mat,
-            params_dataset=params_dataset,
-            model_n_dim=model_n_dim,
-            burn_epochs=burn_epochs,
-            burn_batch_size=burn_batch_size,
-            n_max_positives=n_max_positives,
-            n_max_negatives=n_max_negatives,
-            learning_rate=learning_rate,
-            sigma_min=sigma_min,
-            sigma_max=sigma_max,
-            beta_min=beta_min,
-            beta_max=beta_max,
-            device=device,
-            loader_workers=16,
-            shuffle=True,
-            sparse=False
-        )
-        # basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, _ = LinkPrediction(
+        # basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive = DNML_HGG(
         #     adj_mat=adj_mat,
         #     params_dataset=params_dataset,
         #     model_n_dim=model_n_dim,
@@ -1083,7 +1354,9 @@ if __name__ == '__main__':
         #     burn_batch_size=burn_batch_size,
         #     n_max_positives=n_max_positives,
         #     n_max_negatives=n_max_negatives,
-        #     learning_rate=learning_rate,
+        #     lr_embeddings=lr_embeddings,
+        #     lr_beta=lr_beta,
+        #     lr_sigma=lr_sigma,
         #     sigma_min=sigma_min,
         #     sigma_max=sigma_max,
         #     beta_min=beta_min,
@@ -1093,6 +1366,42 @@ if __name__ == '__main__':
         #     shuffle=True,
         #     sparse=False
         # )
+        # basescore_y_and_z_list.append(basescore_y_and_z)
+        # basescore_y_given_z_list.append(basescore_y_given_z)
+        # basescore_z_list.append(basescore_z)
+        # DNML_codelength_list.append(DNML_codelength)
+        # pc_first_list.append(pc_first)
+        # pc_second_list.append(pc_second)
+        # AIC_naive_list.append(AIC_naive)
+        # BIC_naive_list.append(BIC_naive)
+
+        basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation = LinkPrediction(
+            adj_mat=adj_mat,
+            train_graph=train_graph,
+            positive_samples=positive_samples,
+            negative_samples=negative_samples,
+            lik_data=lik_data,
+            x_lorentz=x_lorentz,
+            params_dataset=params_dataset,
+            model_n_dim=model_n_dim,
+            burn_epochs=burn_epochs,
+            burn_batch_size=burn_batch_size,
+            n_max_positives=n_max_positives,
+            n_max_negatives=n_max_negatives,
+            lr_embeddings=lr_embeddings,
+            lr_epoch_10=lr_epoch_10,
+            lr_beta=lr_beta,
+            lr_sigma=lr_sigma,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            beta_min=beta_min,
+            beta_max=beta_max,
+            device=device,
+            loader_workers=16,
+            shuffle=True,
+            sparse=False,
+            calc_groundtruth=True
+        )
         basescore_y_and_z_list.append(basescore_y_and_z)
         basescore_y_given_z_list.append(basescore_y_given_z)
         basescore_z_list.append(basescore_z)
@@ -1101,6 +1410,9 @@ if __name__ == '__main__':
         pc_second_list.append(pc_second)
         AIC_naive_list.append(AIC_naive)
         BIC_naive_list.append(BIC_naive)
+        AUC_list.append(AUC)
+        GT_AUC_list.append(GT_AUC)
+        Cor_list.append(correlation)
 
         # CV_score = CV_HGG(
         #     adj_mat=adj_mat,
@@ -1124,14 +1436,38 @@ if __name__ == '__main__':
         # CV_score_list.append(CV_score)
 
     result["model_n_dims"] = model_n_dims
+    result["n_nodes"] = params_dataset["n_nodes"]
+    result["n_dim"] = params_dataset["n_dim"]
+    result["R"] = params_dataset["R"]
+    result["sigma"] = params_dataset["sigma"]
+    result["beta"] = params_dataset["beta"]
     result["DNML_codelength"] = DNML_codelength_list
-    result["pc_first"] = pc_first_list
-    result["pc_second"] = pc_second_list
     result["AIC_naive"] = AIC_naive_list
     result["BIC_naive"] = BIC_naive_list
-    # result["CV_score"] = CV_score_list
+    result["AUC"] = AUC_list
+    result["GT_AUC"] = GT_AUC_list
+    result["Cor"] = Cor_list
     result["basescore_y_and_z"] = basescore_y_and_z_list
     result["basescore_y_given_z"] = basescore_y_given_z_list
     result["basescore_z"] = basescore_z_list
+    result["pc_first"] = pc_first_list
+    result["pc_second"] = pc_second_list
+    result["burn_epochs"] = burn_epochs
+    result["burn_batch_size"] = burn_batch_size
+    result["n_max_positives"] = n_max_positives
+    result["n_max_negatives"] = n_max_negatives
+    result["lr_embeddings"] = lr_embeddings
+    result["lr_epoch_10"] = lr_epoch_10
+    result["lr_beta"] = lr_beta
+    result["lr_sigma"] = lr_sigma
+    result["sigma_max"] = sigma_max
+    result["sigma_min"] = sigma_min
+    result["beta_max"] = beta_max
+    result["beta_min"] = beta_min
 
-    result.to_csv("result.csv", index=False)
+    if os.path.exists(filepath):
+        result_previous = pd.read_csv(filepath)
+        result = pd.concat([result_previous, result])
+        result.to_csv(filepath, index=False)
+    else:
+        result.to_csv(filepath, index=False)
