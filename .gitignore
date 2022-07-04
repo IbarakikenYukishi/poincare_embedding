@@ -2,7 +2,7 @@ dataset/
 results/
 *.png
 *.csv
-_*
+._*
 
 .DS_Store
 *.pickle
