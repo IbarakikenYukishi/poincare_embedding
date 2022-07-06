@@ -111,30 +111,26 @@ def set_dim0(x, R):
     return x
 
 
-def calc_log_C_D(n_dim, R, sigma):
-    def integral_sinh_(n, n_dim, exp_C):  # (exp(exp_C)/2)^(D-1)で割った結果
-        if n == 0:
-            # print("n=0:", R * (2 * np.exp(-exp_C))**(n_dim - 1))
-            return R * (2 * np.exp(-exp_C))**(n_dim - 1)
-        elif n == 1:
-            # print("n=1:", (1 / sigma) * (np.exp(sigma * R - exp_C) + np.exp(- sigma * R - exp_C) - 2 * np.exp(-exp_C)) * (2 * np.exp(-exp_C))**(n_dim - 2))
-            return (1 / sigma) * (np.exp(sigma * R - exp_C) + np.exp(- sigma * R - exp_C) - 2 * np.exp(-exp_C)) * (2 * np.exp(-exp_C))**(n_dim - 2)
-        else:
-            ret = 1 / (sigma * n)
-            # print("ret_1:", ret)
-            ret = ret * (np.exp(sigma * R - exp_C) - np.exp(- sigma * R - exp_C)
-                         )**(n - 1) * (np.exp(sigma * R - exp_C) + np.exp(- sigma * R - exp_C))
-            # print("ret_2:", ret)
-            ret = ret * (2 * np.exp(-exp_C)
-                         )**(n_dim - 1 - n)
-            # print("ret_3:", ret)
-            return ret - (n - 1) / n * integral_sinh_(n=n - 2, n_dim=n_dim, exp_C=exp_C)
+def integral_sinh(n, n_dim, sigma, R, exp_C):  # (exp(exp_C)/2)^(D-1)で割った結果
+    if n == 0:
+        return R * (2 * np.exp(-exp_C))**(n_dim - 1)
+    elif n == 1:
+        return (1 / sigma) * (np.exp(sigma * R - exp_C) + np.exp(- sigma * R - exp_C) - 2 * np.exp(-exp_C)) * (2 * np.exp(-exp_C))**(n_dim - 2)
+    else:
+        ret = 1 / (sigma * n)
+        ret = ret * (np.exp(sigma * R - exp_C) - np.exp(- sigma * R - exp_C)
+                     )**(n - 1) * (np.exp(sigma * R - exp_C) + np.exp(- sigma * R - exp_C))
+        ret = ret * (2 * np.exp(-exp_C)
+                     )**(n_dim - 1 - n)
+        return ret - (n - 1) / n * integral_sinh(n=n - 2, n_dim=n_dim, sigma=sigma, R=R, exp_C=exp_C)
 
-    sigma * R
+
+def calc_log_C_D(n_dim, sigma, R):
+
     exp_C = max(1, sigma * R)  # sigma*Rが大きい時のみやる。
 
     log_C_D = (n_dim - 1) * exp_C - (n_dim - 1) * np.log(2)  # 支配項
-    C = integral_sinh_(n=n_dim - 1, n_dim=n_dim, exp_C=exp_C)
+    C = integral_sinh(n=n_dim - 1, n_dim=n_dim, sigma=sigma, R=R, exp_C=exp_C)
     # sigma*Rが十分小さく、次元が十分大きい時にCが負になることがあり、nanを生成するのでその対策
     # そもそもsigma*Rがそんなに小さくならないように　sigmaの範囲を制限した方がいいかもしれない
     C = max(C, 0.00000001)
@@ -142,6 +138,32 @@ def calc_log_C_D(n_dim, R, sigma):
     log_C_D = log_C_D + np.log(C)
 
     return log_C_D
+
+
+def calc_likelihood_list(r, n_dim, R, sigma_min, sigma_max, DIV=1000):
+    sigma_list = np.arange(sigma_min, sigma_max, (sigma_max - sigma_min) / DIV)
+
+    ret = []
+
+    for sigma_ in sigma_list:
+        # rの尤度
+        lik = -(n_dim - 1) * (np.log(1 - np.exp(-2 * sigma_ *
+                                                r) + 0.00001) + sigma_ * r - np.log(2))
+
+        log_C_D = calc_log_C_D(n_dim=n_dim, sigma=sigma_, R=R)
+
+        # # rの正規化項
+        # log_C_D = (n_dim - 1) * sigma_ * R - (n_dim - 1) * np.log(2)  # 支配項
+        # # のこり。計算はwikipediaの再帰計算で代用してもいいかも
+        # # https://en.wikipedia.org/wiki/List_of_integrals_of_hyperbolic_functions
+        # C = integral_sinh(n=n_dim - 1, n_dim=n_dim, R=R, sigma=sigma_)
+        # log_C_D = log_C_D + np.log(C)
+
+        lik = lik + log_C_D
+        ret.append(np.sum(lik))
+        sigma_hat = float(sigma_list[np.argmin(ret)])
+
+    return sigma_list, np.array(ret), sigma_hat
 
 
 def plot_figure(adj_mat, table, path):
@@ -330,7 +352,7 @@ if __name__ == "__main__":
     print(calc_log_C_D(n_dim=16, R=9, sigma=1.5))
     print(calc_log_C_D(n_dim=2, R=10, sigma=2))
     # R*sigma<1
-    # wolfram alphaの出力などと比べると正しくない。
+    # wolfram alphaの出力などと比べると正しくない
     print(calc_log_C_D(n_dim=64, R=10, sigma=0.00001))
     print(calc_log_C_D(n_dim=32, R=7, sigma=0.00001))
     print(calc_log_C_D(n_dim=16, R=9, sigma=0.00001))

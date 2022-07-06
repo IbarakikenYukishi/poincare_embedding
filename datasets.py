@@ -3,21 +3,11 @@ import matplotlib.pyplot as plt
 import os
 from scipy import integrate
 from copy import deepcopy
+from utils.utils import integral_sinh, calc_likelihood_list
 
 np.random.seed(0)
 
 INTEGRAL_DIV = 10000
-
-
-def e_dist(u, v):
-    return np.sqrt(np.sum((u - v)**2))
-
-
-def h_dist(u_e, v_e):
-    ret = 1
-    ret += (2 * e_dist(u_e, v_e)**2) / \
-        ((1 - e_dist(0, u_e)**2) * (1 - e_dist(0, v_e)**2))
-    return np.arccosh(ret)
 
 
 def connection_prob(d, R, beta):
@@ -43,10 +33,8 @@ def calc_dist_angle(n_dim, n, div=INTEGRAL_DIV):
         cum_dens = theta_array / (2 * np.pi)
     else:
         theta_array = np.pi * np.arange(0, div + 1) / div
-        # numerator = lambda theta: np.sin(theta)**(n_dim - 1 - n)
         cum_dens = []
         for theta in theta_array:
-            # cum_dens.append(integrate.quad(numerator, 0, theta)[0])
             cum_dens.append(integral_sin(n_dim - 1 - n, theta))
         cum_dens = np.array(cum_dens) / np.max(cum_dens)
     return theta_array, cum_dens
@@ -56,7 +44,7 @@ def calc_dist_r(n_dim, sigma, R, div=INTEGRAL_DIV):
     # n_dimかRが大きくなると現状だと数値積分があまりうまくいかない。divを増やす必要がある。
     # 発散を防ぐために、exp(sigma*R*(n_dim-1))/(2**(n_dim-1))(分子の積分の支配項)で割ってある。
 
-    def integral_sinh(n, r):  # (exp(sigma*R)/2)^(D-1)で割った結果
+    def integral_sinh_(n, r):  # (exp(sigma*R)/2)^(D-1)で割った結果
         if n == 0:
             return r * (2 * np.exp(-sigma * R))**(n_dim - 1)
         elif n == 1:
@@ -67,14 +55,11 @@ def calc_dist_r(n_dim, sigma, R, div=INTEGRAL_DIV):
                          )**(n - 1) * (np.exp(sigma * (r - R)) + np.exp(-sigma * (r + R)))
             ret = ret * (2 * np.exp(-sigma * R)
                          )**(n_dim - 1 - n)
-            return ret - (n - 1) / n * integral_sinh(n - 2, r)
-
-    numerator = lambda r: (
-        (np.exp(sigma * (r - R)) - np.exp(-sigma * (r + R))))**(n_dim - 1)
+            return ret - (n - 1) / n * integral_sinh_(n - 2, r)
     r_array = R * np.arange(0, div + 1) / div
     cum_dens = []
     for r in r_array:
-        cum_dens.append(integral_sinh(n_dim - 1, r))
+        cum_dens.append(integral_sinh_(n=n_dim - 1, r=r))
     cum_dens = np.array(cum_dens) / np.max(cum_dens)
     return r_array, cum_dens
 
@@ -102,25 +87,29 @@ def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, beta):
     print('convert euclid ended')
 
     adj_mat = np.zeros((n_nodes, n_nodes))
-    # 対角
+    # サンプリング用の行列
     sampling_mat = np.random.uniform(0, 1, adj_mat.shape)
     sampling_mat = np.triu(
         sampling_mat) + np.triu(sampling_mat).T - np.diag(sampling_mat.diagonal())
 
-    # できる限り行列演算を駆使して計算時間を短くする。
-    norm_x_e_2 = np.sum(x_e**2, axis=1).reshape((-1, 1))
-    denominator_mat = (1 - norm_x_e_2) * (1 - norm_x_e_2.T)
-    numerator_mat = norm_x_e_2 + norm_x_e_2.T
-    numerator_mat -= 2 * x_e.dot(x_e.T)
-    # arccoshのエラー対策
+    # lorentz scalar product
+    first_term = - x_e[:, :1] * x_e[:, :1].T
+    remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
+    adj_mat = - (first_term + remaining)
+
     for i in range(n_nodes):
-        numerator_mat[i, i] = 0
-    adj_mat = np.arccosh(1 + 2 * numerator_mat / denominator_mat)
+        adj_mat[i, i] = 1
+    # distance matrix
+    adj_mat = np.arccosh(adj_mat)
+    # probability matrix
     adj_mat = connection_prob(adj_mat, R, beta)
-    # 対角成分は必要ない
+
     for i in range(n_nodes):
         adj_mat[i, i] = 0
+
     adj_mat = np.where(sampling_mat < adj_mat, 1, 0)
+
+    print(adj_mat)
 
     print("adj mat generated")
 
@@ -130,17 +119,16 @@ def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, beta):
 def convert_euclid(x_polar):
     n_nodes = x_polar.shape[0]
     n_dim = x_polar.shape[1]
-    x_euclid = np.zeros((n_nodes, n_dim))
-    radius = np.sqrt(
-        (np.cosh(x_polar[:, 0]) - 1) / (np.cosh(x_polar[:, 0]) + 1))
+    x_euclid = np.zeros((n_nodes, n_dim + 1))
+    x_euclid[:, 0] = np.cosh(x_polar[:, 0])
     for i in range(n_dim):
-        x_euclid[:, i] = radius
+        x_euclid[:, i + 1] = np.sinh(x_polar[:, 0])
         for j in range(0, i + 1):
             if j + 1 < n_dim:
                 if j == i:
-                    x_euclid[:, i] *= np.cos(x_polar[:, j + 1])
+                    x_euclid[:, i + 1] *= np.cos(x_polar[:, j + 1])
                 else:
-                    x_euclid[:, i] *= np.sin(x_polar[:, j + 1])
+                    x_euclid[:, i + 1] *= np.sin(x_polar[:, j + 1])
     return x_euclid
 
 
@@ -280,21 +268,22 @@ def create_test_for_link_prediction(
     return positive_samples, negative_samples, train_graph, lik_data
 
 
-def integral_sinh(n, n_dim, R, sigma):  # (exp(sigma*R)/2)^(D-1)で割った結果
-    if n == 0:
-        return R * (2 * np.exp(-sigma * R))**(n_dim - 1)
-    elif n == 1:
-        return 1 / sigma * (1 + np.exp(-2 * sigma * R) - 2 * np.exp(-sigma * R)) * (2 * np.exp(-sigma * R))**(n_dim - 2)
-    else:
-        ret = 1 / (sigma * n)
-        ret = ret * (1 - np.exp(-2 * sigma * R)
-                     )**(n - 1) * (1 + np.exp(-2 * sigma * R))
-        ret = ret * (2 * np.exp(-sigma * R)
-                     )**(n_dim - 1 - n)
-        return ret - (n - 1) / n * integral_sinh(n=n - 2, n_dim=n_dim, R=R, sigma=sigma)
+# def integral_sinh(n, n_dim, R, sigma):  # (exp(sigma*R)/2)^(D-1)で割った結果
+#     if n == 0:
+#         return R * (2 * np.exp(-sigma * R))**(n_dim - 1)
+#     elif n == 1:
+#         return 1 / sigma * (1 + np.exp(-2 * sigma * R) - 2 * np.exp(-sigma * R)) * (2 * np.exp(-sigma * R))**(n_dim - 2)
+#     else:
+#         ret = 1 / (sigma * n)
+#         ret = ret * (1 - np.exp(-2 * sigma * R)
+#                      )**(n - 1) * (1 + np.exp(-2 * sigma * R))
+#         ret = ret * (2 * np.exp(-sigma * R)
+#                      )**(n_dim - 1 - n)
+# return ret - (n - 1) / n * integral_sinh(n=n - 2, n_dim=n_dim, R=R,
+# sigma=sigma)
 
 
-def calc_likelihood(n_nodes, n_dim, sigma, R):
+def calc_likelihood(n_nodes, n_dim, sigma, R, sigma_min, sigma_max):
 
     x_polar = np.random.uniform(0, 1, (n_nodes))
     # 逆関数法で点を双曲空間からサンプリング
@@ -308,72 +297,60 @@ def calc_likelihood(n_nodes, n_dim, sigma, R):
 
     print(r)
 
-    sigma_list = np.arange(1, 1000) / 100
-    ret = []
+    sigma_list, lik, sigma_hat = calc_likelihood_list(
+        r, n_dim, R, sigma_min, sigma_max)
 
-    for sigma_ in sigma_list:
+    print(sigma_hat)
 
-        # rの尤度
-        lik = -(n_dim - 1) * (np.log(1 - np.exp(-2 * sigma_ *
-                                                r) + 0.00001) + sigma_ * r - np.log(2))
-
-        # rの正規化項
-        log_C_D = (n_dim - 1) * sigma_ * R - (n_dim - 1) * np.log(2)  # 支配項
-        # のこり。計算はwikipediaの再帰計算で代用してもいいかも
-        # https://en.wikipedia.org/wiki/List_of_integrals_of_hyperbolic_functions
-        C = integral_sinh(n=n_dim - 1, n_dim=n_dim, R=R, sigma=sigma_)
-        log_C_D = log_C_D + np.log(C)
-        lik = lik + log_C_D
-        ret.append(np.sum(lik))
-
-    plt.plot(sigma_list, ret)
+    plt.plot(sigma_list, lik)
     plt.savefig("test.png")
 
 
 if __name__ == '__main__':
 
-    calc_likelihood(n_nodes=10, n_dim=3, sigma=1, R=10)
+    # calc_likelihood(n_nodes=1000, n_dim=3, sigma=1,
+    #                 R=10, sigma_min=0.5, sigma_max=10)
 
-    # n_dim_true_list = [8, 16]
-    # n_nodes_list = [400, 800, 1600, 3200, 6400]
-    # n_graphs = 10
+    n_dim_true_list = [8, 16]
+    n_nodes_list = [400, 800, 1600, 3200, 6400]
+    n_graphs = 10
 
-    # for n_dim_true in n_dim_true_list:
-    #     for n_nodes in n_nodes_list:
-    #         for n_graph in range(n_graphs):
+    for n_dim_true in n_dim_true_list:
+        for n_nodes in n_nodes_list:
+            for n_graph in range(n_graphs):
 
-    #             params_adj_mat = {
-    #                 'n_nodes': n_nodes,
-    #                 'n_dim': n_dim_true,
-    #                 'R': np.log(n_nodes) - 0.5,
-    #                 'sigma': 0.1,
-    #                 'beta': 0.3
-    #             }
-    #             adj_mat, x_e = hyperbolic_geometric_graph(
-    #                 n_nodes=params_adj_mat["n_nodes"],
-    #                 n_dim=params_adj_mat["n_dim"],
-    #                 R=params_adj_mat["R"],
-    #                 sigma=params_adj_mat["sigma"],
-    #                 beta=params_adj_mat["beta"]
-    #             )
+                params_adj_mat = {
+                    'n_nodes': n_nodes,
+                    'n_dim': n_dim_true,
+                    'R': np.log(n_nodes) - 0.5,
+                    'sigma': 0.1,
+                    'beta': 0.3
+                }
+                adj_mat, x_e = hyperbolic_geometric_graph(
+                    n_nodes=params_adj_mat["n_nodes"],
+                    n_dim=params_adj_mat["n_dim"],
+                    R=params_adj_mat["R"],
+                    sigma=params_adj_mat["sigma"],
+                    beta=params_adj_mat["beta"]
+                )
 
-    #             positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
-    #                 adj_mat, params_adj_mat)
+                positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
+                    adj_mat, params_adj_mat)
 
-    #             graph_dict = {
-    #                 "params_adj_mat": params_adj_mat,
-    #                 "adj_mat": adj_mat,
-    #                 "positive_samples": positive_samples,
-    #                 "negative_samples": negative_samples,
-    #                 "train_graph": train_graph,
-    #                 "lik_data": lik_data,
-    #                 "x_e": x_e
-    #             }
+                graph_dict = {
+                    "params_adj_mat": params_adj_mat,
+                    "adj_mat": adj_mat,
+                    "positive_samples": positive_samples,
+                    "negative_samples": negative_samples,
+                    "train_graph": train_graph,
+                    "lik_data": lik_data,
+                    "x_e": x_e
+                }
 
-    #             # 平均次数が少なくなるように手で調整する用
-    #             print('average degree:', np.sum(adj_mat) / len(adj_mat))
+                # 平均次数が少なくなるように手で調整する用
+                print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
-    #             os.makedirs('dataset/dim_' +
-    #                         str(params_adj_mat['n_dim']), exist_ok=True)
-    #             np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
-    # params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy', graph_dict)
+                os.makedirs('dataset/dim_' +
+                            str(params_adj_mat['n_dim']), exist_ok=True)
+                np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
+    params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy', graph_dict)
