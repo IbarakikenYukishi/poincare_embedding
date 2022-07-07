@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import datetime
 from tensorboardX import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
-from datasets import hyperbolic_geometric_graph, connection_prob, create_dataset, create_dataset_for_basescore
+from datasets import hyperbolic_geometric_graph, connection_prob
 from copy import deepcopy
 import torch.multiprocessing as multi
 from functools import partial
@@ -35,108 +35,25 @@ import matplotlib.pyplot as plt
 
 plt.style.use("ggplot")
 
-
-def arcosh(x):
-    return torch.log(x + torch.sqrt(x - 1) * torch.sqrt(x + 1))
-
-
-def get_unobserved(
-    adj_mat,
-    data
-):
-    # 観測された箇所が-1となる行列を返す。
-    _adj_mat = deepcopy(adj_mat)
-    n_nodes = _adj_mat.shape[0]
-
-    for i in range(n_nodes):
-        _adj_mat[i, i] = -1
-
-    for datum in data:
-        _adj_mat[datum[0], datum[1]] = -1
-        _adj_mat[datum[1], datum[0]] = -1
-
-    return _adj_mat
-
-
-class Graph(Dataset):
-
-    def __init__(
-        self,
-        data
-    ):
-        self.data = torch.Tensor(data).long()
-        self.n_items = len(data)
-
-    def __len__(self):
-        # データの長さを返す関数
-        return self.n_items
-
-    def __getitem__(self, i):
-        # ノードとラベルを返す。
-        return self.data[i, 0:2], self.data[i, 2]
-
-
-class NegGraph(Dataset):
-
-    def __init__(
-        self,
-        adj_mat,
-        n_max_positives=5,
-        n_max_negatives=50,
-    ):
-        # データセットを作成し、trainとvalidationに分ける
-        self.n_max_positives = n_max_positives
-        self.n_max_negatives = n_max_negatives
-        self._adj_mat = deepcopy(adj_mat)
-        self.n_nodes = self._adj_mat.shape[0]
-        for i in range(self.n_nodes):
-            self._adj_mat[i, i] = -1
-
-    def __len__(self):
-        # データの長さを返す関数
-        return self.n_nodes
-
-    def __getitem__(self, i):
-
-        data = []
-
-        # positiveをサンプリング
-        idx_positives = np.where(self._adj_mat[i, :] == 1)[0]
-        idx_negatives = np.where(self._adj_mat[i, :] == 0)[0]
-        idx_positives = np.random.permutation(idx_positives)
-        idx_negatives = np.random.permutation(idx_negatives)
-        n_positives = min(len(idx_positives), self.n_max_positives)
-        n_negatives = min(len(idx_negatives), self.n_max_negatives)
-
-        # node iを固定した上で、positiveなnode jを対象とする。それに対し、
-        for j in idx_positives[0:n_positives]:
-            data.append((i, j, 1))  # positive sample
-
-        for j in idx_negatives[0:n_negatives]:
-            data.append((i, j, 0))  # negative sample
-
-        if n_positives + n_negatives < self.n_max_positives + self.n_max_negatives:
-            rest = self.n_max_positives + self.n_max_negatives - \
-                (n_positives + n_negatives)
-            rest_idx = np.append(
-                idx_positives[n_positives:], idx_negatives[n_negatives:])
-            rest_label = np.append(np.ones(len(idx_positives) - n_positives), np.zeros(
-                len(idx_negatives) - n_negatives))
-
-            rest_data = np.append(rest_idx.reshape(
-                (-1, 1)), rest_label.reshape((-1, 1)), axis=1).astype(np.int)
-
-            rest_data = np.random.permutation(rest_data)
-
-            for datum in rest_data[:rest]:
-                data.append((i, datum[0], datum[1]))
-
-        data = np.random.permutation(data)
-
-        torch.Tensor(data).long()
-
-        # ノードとラベルを返す。
-        return data[:, 0:2], data[:, 2]
+from utils.utils import (
+    arcosh,
+    h_dist,
+    lorentz_scalar_product,
+    tangent_norm,
+    exp_map,
+    set_dim0,
+    calc_likelihood_list,
+    calc_log_C_D,
+    integral_sinh
+)
+from utils.utils_dataset import (
+    get_unobserved,
+    Graph,
+    NegGraph,
+    create_test_for_link_prediction,
+    create_dataset_for_basescore,
+    create_dataset
+)
 
 
 class RSGD(optim.Optimizer):
@@ -190,9 +107,11 @@ class RSGD(optim.Optimizer):
             # sigma_update = min(sigma_update, group["sigma_max"])
             # if not math.isnan(sigma_update):
             #     sigma.data.copy_(torch.tensor(sigma_update))
+            # print(group["params"])
 
             # うめこみの更新
-            for p in group["params"][2:]:
+            for p in group["params"][1:]:
+                # print("p.grad:", p.grad)
                 if p.grad is None:
                     continue
                 B, D = p.size()
@@ -219,54 +138,6 @@ class RSGD(optim.Optimizer):
                 update = set_dim0(update, group["R"] * 1.00)
 
                 p.data.copy_(update)
-
-
-def h_dist(u_e, v_e):
-    dists = -lorentz_scalar_product(u_e, v_e)
-    dists = torch.where(dists <= 1, torch.ones_like(dists) + 1e-6, dists)
-    dists = arcosh(dists)
-
-    return dists
-
-
-def lorentz_scalar_product(x, y):
-    # 内積
-    # 2次元の入力を仮定している。
-    # BD, BD -> B
-    m = x * y
-    result = m[:, 1:].sum(dim=1) - m[:, 0]
-    return result
-
-
-def tangent_norm(
-    x
-):
-    return torch.sqrt(lorentz_scalar_product(x, x))
-
-
-def exp_map(
-    x,
-    v
-):
-    # Exponential Map
-    tn = tangent_norm(v).unsqueeze(dim=1)
-    tn_expand = tn.repeat(1, x.size()[-1])
-    result = torch.cosh(tn) * x + torch.sinh(tn) * (v / tn)
-    result = torch.where(tn_expand > 0, result, x)
-    return result
-
-
-def set_dim0(x, R):
-    x[:, 1:] = torch.renorm(x[:, 1:], p=2, dim=0,
-                            maxnorm=np.sinh(R))  # 半径Rの範囲に収めたい
-    # 発散しないように気を使う。
-    x_max = torch.max(torch.abs(x[:, 1:]), dim=1, keepdim=True)[0].double()
-    x_max = torch.where(x_max < 1.0, 1.0, x_max)
-
-    dim0 = x_max * torch.sqrt((1 / x_max)**2 +
-                              ((x[:, 1:] / x_max) ** 2).sum(dim=1, keepdim=True))
-    x[:, 0] = dim0[:, 0]
-    return x
 
 
 def e_dist_2(u_e, v_e):
@@ -328,30 +199,16 @@ class Lorentz(nn.Module):
 
     # def integral_sinh(self, n):  # (exp(sigma*R)/2)^(D-1)で割った結果
     #     if n == 0:
-    #         return self.R * (2 * torch.exp(-self.sigma * self.R))**(self.n_dim - 1)
+    #         return self.R * (2 * np.exp(-self.sigma * self.R))**(self.n_dim - 1)
     #     elif n == 1:
-    #         return 1 / self.sigma * (1 + torch.exp(-2 * self.sigma * self.R) - 2 * torch.exp(-self.sigma * self.R)) * (2 * torch.exp(-self.sigma * self.R))**(self.n_dim - 2)
+    #         return 1 / self.sigma * (1 + np.exp(-2 * self.sigma * self.R) - 2 * np.exp(-self.sigma * self.R)) * (2 * np.exp(-self.sigma * self.R))**(self.n_dim - 2)
     #     else:
     #         ret = 1 / (self.sigma * n)
-    #         ret = ret * (1 - torch.exp(-2 * self.sigma * self.R)
-    #                      )**(n - 1) * (1 + torch.exp(-2 * self.sigma * self.R))
-    #         ret = ret * (2 * torch.exp(-self.sigma * self.R)
+    #         ret = ret * (1 - np.exp(-2 * self.sigma * self.R)
+    #                      )**(n - 1) * (1 + np.exp(-2 * self.sigma * self.R))
+    #         ret = ret * (2 * np.exp(-self.sigma * self.R)
     #                      )**(self.n_dim - 1 - n)
     #         return ret - (n - 1) / n * self.integral_sinh(n - 2)
-
-    def integral_sinh(self, n):  # (exp(sigma*R)/2)^(D-1)で割った結果
-        if n == 0:
-            return self.R * (2 * np.exp(-self.sigma * self.R))**(self.n_dim - 1)
-        elif n == 1:
-            return 1 / self.sigma * (1 + np.exp(-2 * self.sigma * self.R) - 2 * np.exp(-self.sigma * self.R)) * (2 * np.exp(-self.sigma * self.R))**(self.n_dim - 2)
-        else:
-            ret = 1 / (self.sigma * n)
-            ret = ret * (1 - np.exp(-2 * self.sigma * self.R)
-                         )**(n - 1) * (1 + np.exp(-2 * self.sigma * self.R))
-            ret = ret * (2 * np.exp(-self.sigma * self.R)
-                         )**(self.n_dim - 1 - n)
-            return ret - (n - 1) / n * self.integral_sinh(n - 2)
-
 
     def sigma_hat(
         self
@@ -360,46 +217,12 @@ class Lorentz(nn.Module):
         r = arcosh(x[:, 0].reshape((-1, 1))).numpy()
         r = np.where(r <= 1e-6, 1e-6, r)[:, 0]
 
+        sigma_list, ret, sigma_hat = calc_likelihood_list(
+            r, n_dim=self.n_dim, R=self.R, sigma_min=1, sigma_max=10.0)
+
         print(r)
-        sigma_list = np.arange(0.001, 100, 100 / 10000)
-        ret = []
 
-        def calc_log_C_D(n_dim, R, sigma):
-            def integral_sinh_(n, n_dim, exp_C):  # (exp(exp_C)/2)^(D-1)で割った結果
-                if n == 0:
-                    return R * (2 * np.exp(-exp_C))**(n_dim - 1)
-                elif n == 1:
-                    return (1 / sigma) * (np.exp(sigma*R-exp_C) + np.exp(- sigma * R - exp_C) - 2 * np.exp(-exp_C)) * (2 * np.exp(-exp_C))**(n_dim - 2)
-                else:
-                    ret = 1 / (sigma * n)
-                    ret = ret * (np.exp(sigma*R-exp_C) - np.exp(- sigma * R - exp_C)
-                                 )**(n - 1) * (np.exp(sigma*R-exp_C) + np.exp(- sigma * R - exp_C))
-                    ret = ret * (2 * np.exp(-exp_C)
-                                 )**(n_dim - 1 - n)
-                    return ret - (n - 1) / n * integral_sinh_(n=n - 2, n_dim=n_dim, exp_C=exp_C)
-
-            exp_C = max(1, sigma*R)
-
-            log_C_D = (self.n_dim - 1) * exp_C - (self.n_dim - 1) * np.log(2)  # 支配項
-            C = integral_sinh_(n=self.n_dim - 1, n_dim=self.n_dim, exp_C=exp_C)
-            log_C_D = log_C_D + np.log(C)
-
-            return log_C_D
-
-        for sigma_ in sigma_list:
-
-            # rの尤度
-            lik = -(self.n_dim - 1) * (np.log(1 - np.exp(-2 * sigma_ *
-                                                    r) + 0.00001) + sigma_ * r - np.log(2))
-
-            # rの正規化項
-            log_C_D = calc_log_C_D(n_dim=self.n_dim, R=self.R, sigma=sigma_)
-            lik = lik + log_C_D
-            ret.append(np.sum(lik))
-
-        ret = np.array(ret)
-        # self.sigma.data = torch.tensor(float(sigma_list[np.argmin(ret)]))
-        self.sigma = float(sigma_list[np.argmin(ret)])
+        self.sigma = sigma_hat
         print("beta:", self.beta)
         print("sigma:", self.sigma)
 
@@ -430,57 +253,19 @@ class Lorentz(nn.Module):
         lik = -(self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * self.sigma *
                                                            r) + 0.00001) + self.sigma * r - torch.log(torch.Tensor([2]).to(self.device)))
         # print("lik:", lik)
-        # rの正規化項
-        log_C_D = torch.Tensor([(self.n_dim - 1) * self.sigma *
-                                self.R - (self.n_dim - 1) * np.log(2)]).to(self.device)  # 支配項
-        # のこり。計算はwikipediaの再帰計算で代用してもいいかも
-        # https://en.wikipedia.org/wiki/List_of_integrals_of_hyperbolic_functions
-        C = torch.Tensor(
-            [self.integral_sinh(self.n_dim - 1)]).to(self.device)
-       	print("C:", C)
-        log_C_D = log_C_D + torch.log(C)
-        lik = lik + log_C_D
+        # # rの正規化項
+        # log_C_D = torch.Tensor([(self.n_dim - 1) * self.sigma *
+        #                         self.R - (self.n_dim - 1) * np.log(2)]).to(self.device)  # 支配項
+        # # のこり。計算はwikipediaの再帰計算で代用してもいいかも
+        # # https://en.wikipedia.org/wiki/List_of_integrals_of_hyperbolic_functions
+        # C = torch.Tensor(
+        #     [self.integral_sinh(self.n_dim - 1)]).to(self.device)
+        # print("C:", C)
+        # log_C_D = log_C_D + torch.log(C)
 
-        # 角度方向の尤度
-        for j in range(1, self.n_dim - 1):
-            lik = lik - (self.n_dim - 1 - j) * torch.log(sin_theta[:, j])
-            # 正規化項を足す
-            lik = lik + torch.log(self.I_D[j])
+        log_C_D = calc_log_C_D(n_dim=self.n_dim, sigma=self.sigma, R=self.R)
+        # print(log_C_D)
 
-        lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
-
-        return lik
-
-    def latent_lik_poincare(
-        self,
-        x
-    ):
-        # 座標変換
-        # 半径方向
-        r = h_dist_p(x, torch.Tensor([[0.0]]).to(self.device))
-        x_ = x**2
-        x_ = torch.cumsum(
-            x_[:, torch.arange(self.n_dim - 1, -1, -1)], dim=1)  # j番目がDからD-jの和
-        x_ = x_[:, torch.arange(self.n_dim - 1, -1, -1)]  # j番目がDからj+1の和
-        x_ = torch.max(torch.Tensor([[0.000001]]).to(self.device), x_)
-        # 角度方向
-        sin_theta = torch.zeros(
-            (x.shape[0], self.n_dim - 1)).to(self.device)
-        for j in range(1, self.n_dim - 1):
-            sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
-
-        # rの尤度
-        lik = -(self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * self.sigma *
-                                                           r) + 0.00001) + self.sigma * r - torch.log(torch.Tensor([2]).to(self.device)))
-
-        # rの正規化項
-        log_C_D = torch.Tensor([(self.n_dim - 1) * self.sigma *
-                                self.R - (self.n_dim - 1) * np.log(2)]).to(self.device)  # 支配項
-        # のこり。計算はwikipediaの再帰計算で代用してもいいかも
-        # https://en.wikipedia.org/wiki/List_of_integrals_of_hyperbolic_functions
-        C = torch.Tensor(
-            [self.integral_sinh(self.n_dim - 1)]).to(self.device)
-        log_C_D = log_C_D + torch.log(C)
         lik = lik + log_C_D
 
         # 角度方向の尤度
@@ -504,7 +289,7 @@ class Lorentz(nn.Module):
             labels
         )
 
-        print(loss)
+        # print(loss)
 
         # z自体のロス
         # 座標を取得
@@ -514,8 +299,8 @@ class Lorentz(nn.Module):
         lik_us = self.latent_lik(us)
         lik_vs = self.latent_lik(vs)
 
-        print(lik_us)
-        print(lik_vs)
+        # print(lik_us)
+        # print(lik_vs)
 
         loss = loss + (lik_us + lik_vs) / (self.n_nodes - 1)
 
@@ -638,49 +423,23 @@ class Lorentz(nn.Module):
         def sqrt_I(
             sigma
         ):
-            denominator = self.integral_sinh(self.n_dim - 1)
-            numerator_1 = lambda r: (r**2) * ((torch.exp(self.sigma * (r - self.R)) + torch.exp(-self.sigma * (r + self.R)))**2) * (
-                (torch.exp(self.sigma * (r - self.R)) - torch.exp(-self.sigma * (r + self.R)))**(self.n_dim - 3))
+            # denominator = self.integral_sinh(self.n_dim - 1)
+            denominator = integral_sinh(
+                n=self.n_dim - 1, n_dim=self.n_dim, sigma=self.sigma, R=self.R, exp_C=self.sigma * self.R)
+
+            numerator_1 = lambda r: (r**2) * ((np.exp(self.sigma * (r - self.R)) + np.exp(-self.sigma * (r + self.R)))**2) * (
+                (np.exp(self.sigma * (r - self.R)) - np.exp(-self.sigma * (r + self.R)))**(self.n_dim - 3))
             first_term = ((self.n_dim - 1)**2) * \
                 integrate.quad(numerator_1, 0, self.R)[0] / denominator
 
-            numerator_2 = lambda r: r * (torch.exp(self.sigma * (r - self.R)) + torch.exp(-self.sigma * (r + self.R))) * (
-                (torch.exp(self.sigma * (r - self.R)) - torch.exp(-self.sigma * (r + self.R)))**(self.n_dim - 2))
+            numerator_2 = lambda r: r * (np.exp(self.sigma * (r - self.R)) + np.exp(-self.sigma * (r + self.R))) * (
+                (np.exp(self.sigma * (r - self.R)) - np.exp(-self.sigma * (r + self.R)))**(self.n_dim - 2))
             second_term = (
                 (self.n_dim - 1) * integrate.quad(numerator_2, 0, self.R)[0] / denominator)**2
 
-            return torch.sqrt(torch.abs(first_term - second_term))
+            return np.sqrt(np.abs(first_term - second_term))
 
         return 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5 * (np.log(self.n_nodes) - np.log(2 * np.pi)) + np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
-
-
-def plot_figure(adj_mat, table, path):
-    # skip padding. plot x y
-
-    print(table.shape)
-
-    plt.figure(figsize=(7, 7))
-
-    _adj_mat = deepcopy(adj_mat)
-    for i in range(len(_adj_mat)):
-        _adj_mat[i, 0:i + 1] = -1
-
-    edges = np.array(np.where(_adj_mat == 1)).T
-
-    for edge in edges:
-        plt.plot(
-            table[edge, 0],
-            table[edge, 1],
-            color="black",
-            # marker="o",
-            alpha=0.5,
-        )
-    plt.scatter(table[:, 0], table[:, 1])
-    plt.gca().set_xlim(-1, 1)
-    plt.gca().set_ylim(-1, 1)
-    plt.gca().add_artist(plt.Circle((0, 0), 1, fill=False, edgecolor="black"))
-    plt.savefig(path)
-    plt.close()
 
 
 def CV_HGG(
@@ -804,60 +563,6 @@ def CV_HGG(
 
     print("CV_score:", CV_score)
     return CV_score
-
-
-def create_test_for_link_prediction(
-    adj_mat,
-    params_dataset
-):
-    # testデータとtrain_graphを作成する
-    n_total_positives = np.sum(adj_mat) / 2
-    n_samples_test = int(n_total_positives * 0.1)
-    n_neg_samples_per_positive = 1  # positive1つに対してnegativeをいくつサンプリングするか
-
-    # positive sampleのサンプリング
-    train_graph = np.copy(adj_mat)
-    # 対角要素からはサンプリングしない
-    for i in range(params_dataset["n_nodes"]):
-        train_graph[i, i] = -1
-
-    positive_samples = np.array(np.where(train_graph == 1)).T
-    # 実質的に重複している要素を削除
-    positive_samples_ = []
-    for p in positive_samples:
-        if p[0] > p[1]:
-            positive_samples_.append([p[0], p[1]])
-    positive_samples = np.array(positive_samples_)
-
-    positive_samples = np.random.permutation(positive_samples)[:n_samples_test]
-
-    # サンプリングしたデータをtrain_graphから削除
-    for t in positive_samples:
-        train_graph[t[0], t[1]] = -1
-        train_graph[t[1], t[0]] = -1
-
-    # negative sampleのサンプリング
-    # permutationが遅くなるので直接サンプリングする
-    negative_samples = []
-    while len(negative_samples) < n_samples_test * n_neg_samples_per_positive:
-        u = np.random.randint(0, params_dataset["n_nodes"])
-        v = np.random.randint(0, params_dataset["n_nodes"])
-        if train_graph[u, v] != 0:
-            continue
-        else:
-            negative_samples.append([u, v])
-            train_graph[u, v] = -1
-            train_graph[v, u] = -1
-
-    negative_samples = np.array(negative_samples)
-
-    # これは重複を許す
-    lik_data = create_dataset_for_basescore(
-        adj_mat=train_graph,
-        n_max_samples=int((params_dataset["n_nodes"] - 1) * 0.1)
-    )
-
-    return positive_samples, negative_samples, train_graph, lik_data
 
 
 def LinkPrediction(
@@ -1217,6 +922,8 @@ if __name__ == '__main__':
 
     n_nodes = 400
 
+    # print("R:", np.log(n_nodes) - 0.5)
+
     print("R:", np.log(n_nodes) - 0.5)
 
     params_dataset = {
@@ -1228,7 +935,7 @@ if __name__ == '__main__':
     }
 
     # パラメータ
-    burn_epochs = 100
+    burn_epochs = 1
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     n_max_negatives = n_max_positives * 10
@@ -1238,8 +945,8 @@ if __name__ == '__main__':
         32 / 100  # batchサイズに対応して学習率変更
     lr_beta = 0.001
     lr_sigma = 0.001
-    sigma_max = 1.0
-    sigma_min = 0.001
+    sigma_max = 10.0
+    sigma_min = 0.01
     beta_min = 0.1
     beta_max = 10.0
     # それ以外
@@ -1251,7 +958,15 @@ if __name__ == '__main__':
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # 隣接行列
-    adj_mat, x_e = hyperbolic_geometric_graph(
+    # adj_mat, x_e = hyperbolic_geometric_graph(
+    #     n_nodes=params_dataset['n_nodes'],
+    #     n_dim=params_dataset['n_dim'],
+    #     R=params_dataset['R'],
+    #     sigma=params_dataset['sigma'],
+    #     beta=params_dataset['beta']
+    # )
+
+    adj_mat, x_lorentz = hyperbolic_geometric_graph(
         n_nodes=params_dataset['n_nodes'],
         n_dim=params_dataset['n_dim'],
         R=params_dataset['R'],
@@ -1261,11 +976,11 @@ if __name__ == '__main__':
 
     # print(x_e)
     # 真のローレンツモデルの座標
-    x_lorentz = np.zeros(
-        (params_dataset['n_nodes'], params_dataset['n_dim'] + 1))
-    for i in range(params_dataset['n_nodes']):
-        x_lorentz[i, 0] = (1 + np.sum(x_e[i]**2)) / (1 - np.sum(x_e[i]**2))
-        x_lorentz[i, 1:] = 2 * x_e[i] / (1 - np.sum(x_e[i]**2))
+    # x_lorentz = np.zeros(
+    #     (params_dataset['n_nodes'], params_dataset['n_dim'] + 1))
+    # for i in range(params_dataset['n_nodes']):
+    #     x_lorentz[i, 0] = (1 + np.sum(x_e[i]**2)) / (1 - np.sum(x_e[i]**2))
+    #     x_lorentz[i, 1:] = 2 * x_e[i] / (1 - np.sum(x_e[i]**2))
 
     # print(x_lorentz)
 

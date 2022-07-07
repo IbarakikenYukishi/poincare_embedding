@@ -6,8 +6,7 @@ import sys
 import torch
 import random
 import numpy as np
-from torch import nn
-from torch import optim
+from torch import nn, optim, Tensor
 from tqdm import trange, tqdm
 from collections import Counter
 from datetime import datetime
@@ -20,7 +19,6 @@ from functools import partial
 import pandas as pd
 import gc
 import time
-from torch import Tensor
 from scipy import integrate
 from sklearn import metrics
 import math
