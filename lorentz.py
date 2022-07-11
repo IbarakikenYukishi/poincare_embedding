@@ -68,8 +68,8 @@ class RSGD(optim.Optimizer):
         lr_beta,
         lr_sigma,
         R,
-        sigma_max,
-        sigma_min,
+        # sigma_max,
+        # sigma_min,
         beta_max,
         beta_min,
         device
@@ -79,8 +79,8 @@ class RSGD(optim.Optimizer):
             "lr_beta": lr_beta,
             "lr_sigma": lr_sigma,
             'R': R,
-            "sigma_max": sigma_max,
-            "sigma_min": sigma_min,
+            # "sigma_max": sigma_max,
+            # "sigma_min": sigma_min,
             "beta_max": beta_max,
             "beta_min": beta_min,
             "device": device
@@ -92,7 +92,7 @@ class RSGD(optim.Optimizer):
 
             # betaとsigmaの更新
             beta = group["params"][0]
-            sigma = group["params"][1]
+            # sigma = group["params"][1]
 
             beta_update = beta.data - \
                 group["lr_beta"] * beta.grad.data
@@ -140,17 +140,6 @@ class RSGD(optim.Optimizer):
                 p.data.copy_(update)
 
 
-def e_dist_2(u_e, v_e):
-    return torch.sum((u_e - v_e)**2, dim=1)
-
-
-def h_dist_p(u_e, v_e):
-    ret = 1.0
-    ret += (2.0 * e_dist_2(u_e, v_e)) / \
-        ((1.0 - e_dist_2(0.0, u_e)) * (1.0 - e_dist_2(0.0, v_e)))
-    return arcosh(ret)
-
-
 class Lorentz(nn.Module):
 
     def __init__(
@@ -160,6 +149,8 @@ class Lorentz(nn.Module):
         R,
         beta,
         sigma,
+        sigma_min,
+        sigma_max,
         init_range=0.01,
         sparse=True,
         device="cpu"
@@ -169,6 +160,8 @@ class Lorentz(nn.Module):
         self.n_dim = n_dim
         self.beta = nn.Parameter(torch.tensor(beta))
         self.sigma = sigma
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
         # self.sigma = nn.Parameter(torch.tensor(sigma))
         self.R = R
         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
@@ -197,19 +190,6 @@ class Lorentz(nn.Module):
         with torch.no_grad():
             set_dim0(self.table.weight, self.R)
 
-    # def integral_sinh(self, n):  # (exp(sigma*R)/2)^(D-1)で割った結果
-    #     if n == 0:
-    #         return self.R * (2 * np.exp(-self.sigma * self.R))**(self.n_dim - 1)
-    #     elif n == 1:
-    #         return 1 / self.sigma * (1 + np.exp(-2 * self.sigma * self.R) - 2 * np.exp(-self.sigma * self.R)) * (2 * np.exp(-self.sigma * self.R))**(self.n_dim - 2)
-    #     else:
-    #         ret = 1 / (self.sigma * n)
-    #         ret = ret * (1 - np.exp(-2 * self.sigma * self.R)
-    #                      )**(n - 1) * (1 + np.exp(-2 * self.sigma * self.R))
-    #         ret = ret * (2 * np.exp(-self.sigma * self.R)
-    #                      )**(self.n_dim - 1 - n)
-    #         return ret - (n - 1) / n * self.integral_sinh(n - 2)
-
     def sigma_hat(
         self
     ):
@@ -218,9 +198,10 @@ class Lorentz(nn.Module):
         r = np.where(r <= 1e-6, 1e-6, r)[:, 0]
 
         sigma_list, ret, sigma_hat = calc_likelihood_list(
-            r, n_dim=self.n_dim, R=self.R, sigma_min=1, sigma_max=10.0)
+            r, n_dim=self.n_dim, R=self.R, sigma_min=self.sigma_min, sigma_max=self.sigma_max, DIV=1000)
 
         print(r)
+        # print(ret)
 
         self.sigma = sigma_hat
         print("beta:", self.beta)
@@ -228,53 +209,58 @@ class Lorentz(nn.Module):
 
     def latent_lik(
         self,
-        x
+        x,
+        polar=False
     ):
         # 半径方向
-        r = arcosh(x[:, 0].reshape((-1, 1))).double()
+        r = arcosh(torch.sqrt(
+            1 + (x[:, 1:]**2).sum(dim=1, keepdim=True))).double()
         r = torch.where(r <= 1e-6, 1e-6, r)[:, 0]
-
-        # print(x[0, :])
-
-        x_ = x[:, 1:]
-        # print(x_)
-        x_ = x_**2
-        x_ = torch.cumsum(
-            x_[:, torch.arange(self.n_dim - 1, -1, -1)], dim=1)  # j番目がDからD-jの和
-        x_ = x_[:, torch.arange(self.n_dim - 1, -1, -1)]  # j番目がDからj+1の和
-        x_ = torch.max(torch.Tensor([[0.000001]]).to(self.device), x_)
-        # 角度方向
-        sin_theta = torch.zeros(
-            (x.shape[0], self.n_dim - 1)).to(self.device)
-        for j in range(1, self.n_dim - 1):
-            sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
 
         # rの尤度
         lik = -(self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * self.sigma *
                                                            r) + 0.00001) + self.sigma * r - torch.log(torch.Tensor([2]).to(self.device)))
-        # print("lik:", lik)
-        # # rの正規化項
-        # log_C_D = torch.Tensor([(self.n_dim - 1) * self.sigma *
-        #                         self.R - (self.n_dim - 1) * np.log(2)]).to(self.device)  # 支配項
-        # # のこり。計算はwikipediaの再帰計算で代用してもいいかも
-        # # https://en.wikipedia.org/wiki/List_of_integrals_of_hyperbolic_functions
-        # C = torch.Tensor(
-        #     [self.integral_sinh(self.n_dim - 1)]).to(self.device)
-        # print("C:", C)
-        # log_C_D = log_C_D + torch.log(C)
 
+        # rの正規化項
         log_C_D = calc_log_C_D(n_dim=self.n_dim, sigma=self.sigma, R=self.R)
-        # print(log_C_D)
 
         lik = lik + log_C_D
 
-        # 角度方向の尤度
-        for j in range(1, self.n_dim - 1):
-            lik = lik - (self.n_dim - 1 - j) * torch.log(sin_theta[:, j])
-            # 正規化項を足す
-            lik = lik + torch.log(self.I_D[j])
+        if polar:
+            x_ = x[:, 1:]
+            x_ = x_**2
+            x_ = torch.cumsum(
+                x_[:, torch.arange(self.n_dim - 1, -1, -1)], dim=1)  # j番目がDからD-jの和
+            x_ = x_[:, torch.arange(self.n_dim - 1, -1, -1)]  # j番目がDからj+1の和
+            x_ = torch.max(torch.Tensor([[0.000001]]).to(self.device), x_)
+            # 角度方向
+            sin_theta = torch.zeros(
+                (x.shape[0], self.n_dim - 1)).to(self.device)
+            for j in range(1, self.n_dim - 1):
+                sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
 
-        lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
+            # 角度方向の尤度
+            for j in range(1, self.n_dim - 1):
+                lik = lik - (self.n_dim - 1 - j) * torch.log(sin_theta[:, j])
+                # 正規化項を足す
+                lik = lik + torch.log(self.I_D[j])
+
+            lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
+
+        else:
+            # 角度方向の尤度
+            for j in range(1, self.n_dim - 1):
+                # 正規化項を足す
+                lik = lik + torch.log(self.I_D[j])
+
+            lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
+
+            # ヤコビアン由来の項
+            lik = lik + (self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * r) +
+                                                      0.00001) + r - torch.log(torch.Tensor([2]).to(self.device)))
+
+            lik = lik + torch.log(1 + torch.exp(-2 * r) + 0.00001) + \
+                r - torch.log(torch.Tensor([2]).to(self.device))
 
         return lik
 
@@ -289,8 +275,6 @@ class Lorentz(nn.Module):
             labels
         )
 
-        # print(loss)
-
         # z自体のロス
         # 座標を取得
         us = self.table(pairs[:, 0])
@@ -298,9 +282,6 @@ class Lorentz(nn.Module):
 
         lik_us = self.latent_lik(us)
         lik_vs = self.latent_lik(vs)
-
-        # print(lik_us)
-        # print(lik_vs)
 
         loss = loss + (lik_us + lik_vs) / (self.n_nodes - 1)
 
@@ -615,6 +596,8 @@ def LinkPrediction(
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
         sigma=1.0,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
         beta=1.0,
         init_range=0.001,
         sparse=sparse,
@@ -627,8 +610,8 @@ def LinkPrediction(
         lr_beta=lr_beta,
         lr_sigma=lr_sigma,
         R=params_dataset['R'],
-        sigma_max=sigma_max,
-        sigma_min=sigma_min,
+        # sigma_max=sigma_max,
+        # sigma_min=sigma_min,
         beta_max=beta_max,
         beta_min=beta_min,
         device=device
@@ -924,18 +907,18 @@ if __name__ == '__main__':
 
     # print("R:", np.log(n_nodes) - 0.5)
 
-    print("R:", np.log(n_nodes) - 0.5)
+    print("R:", np.log(n_nodes))
 
     params_dataset = {
         'n_nodes': n_nodes,
-        'n_dim': 16,
-        'R': np.log(n_nodes) - 0.5,
+        'n_dim': 8,
+        'R': np.log(n_nodes),
         'sigma': 1,
         'beta': 0.4
     }
 
     # パラメータ
-    burn_epochs = 1
+    burn_epochs = 300
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     n_max_negatives = n_max_positives * 10
@@ -946,7 +929,7 @@ if __name__ == '__main__':
     lr_beta = 0.001
     lr_sigma = 0.001
     sigma_max = 10.0
-    sigma_min = 0.01
+    sigma_min = 0.1
     beta_min = 0.1
     beta_max = 10.0
     # それ以外
@@ -1003,8 +986,8 @@ if __name__ == '__main__':
     GT_AUC_list = []
     Cor_list = []
 
-    # model_n_dims = [4, 8, 16, 32, 64]
-    model_n_dims = [16, 32, 64]
+    model_n_dims = [4, 8, 16, 32, 64]
+    # model_n_dims = [16, 32, 64]
 
     # model_n_dims = [64]
 
@@ -1135,4 +1118,13 @@ if __name__ == '__main__':
     result["beta_max"] = beta_max
     result["beta_min"] = beta_min
 
-    result.to_csv("result_lorentz.csv", index=False)
+    filepath = "result_lorentz.csv"
+
+    if os.path.exists(filepath):
+        result_previous = pd.read_csv(filepath)
+        result = pd.concat([result_previous, result])
+        result.to_csv(filepath, index=False)
+    else:
+        result.to_csv(filepath, index=False)
+
+    # result.to_csv("result_lorentz.csv", index=False)

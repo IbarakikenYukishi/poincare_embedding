@@ -74,6 +74,28 @@ def h_dist(
     return dists
 
 
+def e_dist(
+    u_e,
+    v_e,
+    use_torch=True
+):
+    if use_torch:
+        return torch.sum((u_e - v_e)**2, dim=1)
+    else:
+        return np.sum((u_e - v_e)**2, axis=1)
+
+
+def h_dist_p(
+    u_e,
+    v_e,
+    use_torch=True
+):
+    ret = 1.0
+    ret += (2.0 * e_dist(u_e, v_e, use_torch)) / \
+        ((1.0 - e_dist(0.0, u_e, use_torch)) * (1.0 - e_dist(0.0, v_e, use_torch)))
+    return arcosh(ret, use_torch)
+
+
 def tangent_norm(
     x,
     use_torch=True
@@ -193,76 +215,76 @@ def plot_figure(adj_mat, table, path):
     plt.close()
 
 
-def get_unobserved(
-    adj_mat,
-    data
-):
-    # 観測された箇所が-1となる行列を返す。
-    _adj_mat = deepcopy(adj_mat)
-    n_nodes = _adj_mat.shape[0]
+# def get_unobserved(
+#     adj_mat,
+#     data
+# ):
+#     # 観測された箇所が-1となる行列を返す。
+#     _adj_mat = deepcopy(adj_mat)
+#     n_nodes = _adj_mat.shape[0]
 
-    for i in range(n_nodes):
-        _adj_mat[i, i] = -1
+#     for i in range(n_nodes):
+#         _adj_mat[i, i] = -1
 
-    for datum in data:
-        _adj_mat[datum[0], datum[1]] = -1
-        _adj_mat[datum[1], datum[0]] = -1
+#     for datum in data:
+#         _adj_mat[datum[0], datum[1]] = -1
+#         _adj_mat[datum[1], datum[0]] = -1
 
-    return _adj_mat
+#     return _adj_mat
 
 
-def create_test_for_link_prediction(
-    adj_mat,
-    params_dataset
-):
-    # testデータとtrain_graphを作成する
-    n_total_positives = np.sum(adj_mat) / 2
-    n_samples_test = int(n_total_positives * 0.1)
-    n_neg_samples_per_positive = 1  # positive1つに対してnegativeをいくつサンプリングするか
+# def create_test_for_link_prediction(
+#     adj_mat,
+#     params_dataset
+# ):
+#     # testデータとtrain_graphを作成する
+#     n_total_positives = np.sum(adj_mat) / 2
+#     n_samples_test = int(n_total_positives * 0.1)
+#     n_neg_samples_per_positive = 1  # positive1つに対してnegativeをいくつサンプリングするか
 
-    # positive sampleのサンプリング
-    train_graph = np.copy(adj_mat)
-    # 対角要素からはサンプリングしない
-    for i in range(params_dataset["n_nodes"]):
-        train_graph[i, i] = -1
+#     # positive sampleのサンプリング
+#     train_graph = np.copy(adj_mat)
+#     # 対角要素からはサンプリングしない
+#     for i in range(params_dataset["n_nodes"]):
+#         train_graph[i, i] = -1
 
-    positive_samples = np.array(np.where(train_graph == 1)).T
-    # 実質的に重複している要素を削除
-    positive_samples_ = []
-    for p in positive_samples:
-        if p[0] > p[1]:
-            positive_samples_.append([p[0], p[1]])
-    positive_samples = np.array(positive_samples_)
+#     positive_samples = np.array(np.where(train_graph == 1)).T
+#     # 実質的に重複している要素を削除
+#     positive_samples_ = []
+#     for p in positive_samples:
+#         if p[0] > p[1]:
+#             positive_samples_.append([p[0], p[1]])
+#     positive_samples = np.array(positive_samples_)
 
-    positive_samples = np.random.permutation(positive_samples)[:n_samples_test]
+#     positive_samples = np.random.permutation(positive_samples)[:n_samples_test]
 
-    # サンプリングしたデータをtrain_graphから削除
-    for t in positive_samples:
-        train_graph[t[0], t[1]] = -1
-        train_graph[t[1], t[0]] = -1
+#     # サンプリングしたデータをtrain_graphから削除
+#     for t in positive_samples:
+#         train_graph[t[0], t[1]] = -1
+#         train_graph[t[1], t[0]] = -1
 
-    # negative sampleのサンプリング
-    # permutationが遅くなるので直接サンプリングする
-    negative_samples = []
-    while len(negative_samples) < n_samples_test * n_neg_samples_per_positive:
-        u = np.random.randint(0, params_dataset["n_nodes"])
-        v = np.random.randint(0, params_dataset["n_nodes"])
-        if train_graph[u, v] != 0:
-            continue
-        else:
-            negative_samples.append([u, v])
-            train_graph[u, v] = -1
-            train_graph[v, u] = -1
+#     # negative sampleのサンプリング
+#     # permutationが遅くなるので直接サンプリングする
+#     negative_samples = []
+#     while len(negative_samples) < n_samples_test * n_neg_samples_per_positive:
+#         u = np.random.randint(0, params_dataset["n_nodes"])
+#         v = np.random.randint(0, params_dataset["n_nodes"])
+#         if train_graph[u, v] != 0:
+#             continue
+#         else:
+#             negative_samples.append([u, v])
+#             train_graph[u, v] = -1
+#             train_graph[v, u] = -1
 
-    negative_samples = np.array(negative_samples)
+#     negative_samples = np.array(negative_samples)
 
-    # これは重複を許す
-    lik_data = create_dataset_for_basescore(
-        adj_mat=train_graph,
-        n_max_samples=int((params_dataset["n_nodes"] - 1) * 0.1)
-    )
+#     # これは重複を許す
+#     lik_data = create_dataset_for_basescore(
+#         adj_mat=train_graph,
+#         n_max_samples=int((params_dataset["n_nodes"] - 1) * 0.1)
+#     )
 
-    return positive_samples, negative_samples, train_graph, lik_data
+#     return positive_samples, negative_samples, train_graph, lik_data
 
 if __name__ == "__main__":
     # All of the functions assumes the curvature of hyperbolic space is 1.
