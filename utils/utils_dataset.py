@@ -166,7 +166,7 @@ def create_dataset_for_basescore(
 
     # train = data[0:int(len(data) * (1 - val_size))]
     # val = data[int(len(data) * (1 - val_size)):]
-    print(np.sum(_adj_mat))
+    # print(np.sum(_adj_mat))
 
     return data
 

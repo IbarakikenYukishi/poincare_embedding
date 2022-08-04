@@ -23,6 +23,7 @@ from scipy import integrate
 from sklearn import metrics
 import math
 from scipy import stats
+from sklearn.linear_model import LogisticRegression
 
 np.random.seed(0)
 
@@ -186,6 +187,54 @@ def calc_likelihood_list(r, n_dim, R, sigma_min, sigma_max, DIV=1000):
     return sigma_list, np.array(ret), sigma_hat
 
 
+def calc_beta_hat(z, train_graph, n_samples, R, beta_min, beta_max):
+    n_nodes = z.shape[0]
+    idx = np.array(range(n_nodes))
+    idx = np.random.permutation(idx)[:n_samples]
+    # print("n_samples:", n_samples)
+
+    z_ = z[idx, :]
+
+    first_term = - z_[:, :1] * z_[:, :1].T
+
+    # remaining = x_e_[:, 1:].dot(x_e_[:, 1:].T)
+    remaining = torch.mm(z_[:, 1:], z_[:, 1:].T)
+    adj_mat_hat = - (first_term + remaining)
+    for i in range(n_samples):
+        adj_mat_hat[i, i] = 1
+
+    # 数値誤差対策
+    adj_mat_hat = adj_mat_hat.double()
+    adj_mat_hat = torch.where(adj_mat_hat <= 1 + 1e-6, 1 + 1e-6, adj_mat_hat)
+
+    # distance matrix
+    adj_mat_hat = arcosh(adj_mat_hat)
+    for i in range(n_samples):
+        adj_mat_hat[i, i] = -1
+
+    train_graph_ = train_graph[idx][:, idx]
+
+    for i in range(n_samples):
+        train_graph_[i, :i + 1] = -1
+
+    adj_mat_hat = adj_mat_hat.cpu().numpy()
+
+    y = train_graph_.flatten()
+    x = adj_mat_hat.flatten()
+
+    non_empty_idx = np.where(y != -1)[0]
+    y = y[non_empty_idx].reshape((-1, 1))
+    x = -(x[non_empty_idx] - R).reshape((-1, 1))
+
+    # print(y)
+    # print(x)
+
+    lr = LogisticRegression()  # ロジスティック回帰モデルのインスタンスを作成
+    lr.fit(x, y)  # ロジスティック回帰モデルの重みを学習
+
+    return max(min(lr.coef_[0, 0], beta_max), beta_min)
+
+
 def plot_figure(adj_mat, table, path):
     # skip padding. plot x y
 
@@ -214,77 +263,6 @@ def plot_figure(adj_mat, table, path):
     plt.savefig(path)
     plt.close()
 
-
-# def get_unobserved(
-#     adj_mat,
-#     data
-# ):
-#     # 観測された箇所が-1となる行列を返す。
-#     _adj_mat = deepcopy(adj_mat)
-#     n_nodes = _adj_mat.shape[0]
-
-#     for i in range(n_nodes):
-#         _adj_mat[i, i] = -1
-
-#     for datum in data:
-#         _adj_mat[datum[0], datum[1]] = -1
-#         _adj_mat[datum[1], datum[0]] = -1
-
-#     return _adj_mat
-
-
-# def create_test_for_link_prediction(
-#     adj_mat,
-#     params_dataset
-# ):
-#     # testデータとtrain_graphを作成する
-#     n_total_positives = np.sum(adj_mat) / 2
-#     n_samples_test = int(n_total_positives * 0.1)
-#     n_neg_samples_per_positive = 1  # positive1つに対してnegativeをいくつサンプリングするか
-
-#     # positive sampleのサンプリング
-#     train_graph = np.copy(adj_mat)
-#     # 対角要素からはサンプリングしない
-#     for i in range(params_dataset["n_nodes"]):
-#         train_graph[i, i] = -1
-
-#     positive_samples = np.array(np.where(train_graph == 1)).T
-#     # 実質的に重複している要素を削除
-#     positive_samples_ = []
-#     for p in positive_samples:
-#         if p[0] > p[1]:
-#             positive_samples_.append([p[0], p[1]])
-#     positive_samples = np.array(positive_samples_)
-
-#     positive_samples = np.random.permutation(positive_samples)[:n_samples_test]
-
-#     # サンプリングしたデータをtrain_graphから削除
-#     for t in positive_samples:
-#         train_graph[t[0], t[1]] = -1
-#         train_graph[t[1], t[0]] = -1
-
-#     # negative sampleのサンプリング
-#     # permutationが遅くなるので直接サンプリングする
-#     negative_samples = []
-#     while len(negative_samples) < n_samples_test * n_neg_samples_per_positive:
-#         u = np.random.randint(0, params_dataset["n_nodes"])
-#         v = np.random.randint(0, params_dataset["n_nodes"])
-#         if train_graph[u, v] != 0:
-#             continue
-#         else:
-#             negative_samples.append([u, v])
-#             train_graph[u, v] = -1
-#             train_graph[v, u] = -1
-
-#     negative_samples = np.array(negative_samples)
-
-#     # これは重複を許す
-#     lik_data = create_dataset_for_basescore(
-#         adj_mat=train_graph,
-#         n_max_samples=int((params_dataset["n_nodes"] - 1) * 0.1)
-#     )
-
-#     return positive_samples, negative_samples, train_graph, lik_data
 
 if __name__ == "__main__":
     # All of the functions assumes the curvature of hyperbolic space is 1.

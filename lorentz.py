@@ -44,7 +44,8 @@ from utils.utils import (
     set_dim0,
     calc_likelihood_list,
     calc_log_C_D,
-    integral_sinh
+    integral_sinh,
+    calc_beta_hat
 )
 from utils.utils_dataset import (
     get_unobserved,
@@ -151,6 +152,8 @@ class Lorentz(nn.Module):
         sigma,
         sigma_min,
         sigma_max,
+        # beta_min,
+        # beta_max,
         init_range=0.01,
         sparse=True,
         device="cpu"
@@ -159,9 +162,12 @@ class Lorentz(nn.Module):
         self.n_nodes = n_nodes
         self.n_dim = n_dim
         self.beta = nn.Parameter(torch.tensor(beta))
+        # self.beta = beta
         self.sigma = sigma
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
+        # self.beta_min = beta_min
+        # self.beta_max = beta_max
         # self.sigma = nn.Parameter(torch.tensor(sigma))
         self.R = R
         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
@@ -201,11 +207,28 @@ class Lorentz(nn.Module):
             r, n_dim=self.n_dim, R=self.R, sigma_min=self.sigma_min, sigma_max=self.sigma_max, DIV=1000)
 
         print(r)
-        # print(ret)
 
         self.sigma = sigma_hat
-        print("beta:", self.beta)
         print("sigma:", self.sigma)
+        print("beta:", self.beta)
+
+    # def beta_hat(
+    #     self,
+    #     train_graph,
+    #     n_samples
+    # ):
+    #     x = self.table.weight.data
+    #     # r = arcosh(x[:, 0].reshape((-1, 1))).numpy()
+    #     # r = np.where(r <= 1e-6, 1e-6, r)[:, 0]
+
+    #     # n_samples = int(n_nodes * 0.1)
+
+    #     lr = calc_beta_hat(z=x, train_graph=train_graph, n_samples=n_samples,
+    # R=self.R, beta_min=self.beta_min, beta_max=self.beta_max)
+
+    #     self.beta = lr
+
+    #     print("beta:", self.beta)
 
     def latent_lik(
         self,
@@ -596,6 +619,8 @@ def LinkPrediction(
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
         sigma=1.0,
+        # beta_min=beta_min,
+        # beta_max=beta_max,
         sigma_min=sigma_min,
         sigma_max=sigma_max,
         beta=1.0,
@@ -632,6 +657,10 @@ def LinkPrediction(
 
         losses = []
         model.sigma_hat()
+        # model.beta_hat(
+        #     train_graph=train_graph,
+        #     n_samples=int(len(train_graph)*0.5)
+        # )
         for pairs, labels in dataloader:
             pairs = pairs.reshape((-1, 2))
             labels = labels.reshape(-1)
@@ -751,7 +780,7 @@ def LinkPrediction(
     print("BIC_naive:", BIC_naive)
     print("AUC:", AUC)
 
-    return basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation
+    return basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation, model
 
 
 def DNML_HGG(
@@ -794,7 +823,7 @@ def DNML_HGG(
         R=params_dataset['R'],
         sigma=1.0,
         beta=1.0,
-        init_range=0.1,
+        init_range=0.001,
         sparse=sparse,
         device=device
     )
@@ -903,7 +932,7 @@ if __name__ == '__main__':
     #     'beta': 0.3
     # }
 
-    n_nodes = 400
+    n_nodes = 6400
 
     # print("R:", np.log(n_nodes) - 0.5)
 
@@ -911,21 +940,16 @@ if __name__ == '__main__':
 
     params_dataset = {
         'n_nodes': n_nodes,
-        'n_dim': 8,
+        'n_dim': 4,
         'R': np.log(n_nodes),
         'sigma': 1,
         'beta': 0.4
     }
 
     # パラメータ
-    burn_epochs = 300
+    burn_epochs = 800
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
-    n_max_negatives = n_max_positives * 10
-    lr_embeddings = 0.1
-    lr_epoch_10 = 10.0 * \
-        (burn_batch_size * (n_max_positives + n_max_negatives)) / \
-        32 / 100  # batchサイズに対応して学習率変更
     lr_beta = 0.001
     lr_sigma = 0.001
     sigma_max = 10.0
@@ -941,14 +965,6 @@ if __name__ == '__main__':
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # 隣接行列
-    # adj_mat, x_e = hyperbolic_geometric_graph(
-    #     n_nodes=params_dataset['n_nodes'],
-    #     n_dim=params_dataset['n_dim'],
-    #     R=params_dataset['R'],
-    #     sigma=params_dataset['sigma'],
-    #     beta=params_dataset['beta']
-    # )
-
     adj_mat, x_lorentz = hyperbolic_geometric_graph(
         n_nodes=params_dataset['n_nodes'],
         n_dim=params_dataset['n_dim'],
@@ -956,18 +972,6 @@ if __name__ == '__main__':
         sigma=params_dataset['sigma'],
         beta=params_dataset['beta']
     )
-
-    # print(x_e)
-    # 真のローレンツモデルの座標
-    # x_lorentz = np.zeros(
-    #     (params_dataset['n_nodes'], params_dataset['n_dim'] + 1))
-    # for i in range(params_dataset['n_nodes']):
-    #     x_lorentz[i, 0] = (1 + np.sum(x_e[i]**2)) / (1 - np.sum(x_e[i]**2))
-    #     x_lorentz[i, 1:] = 2 * x_e[i] / (1 - np.sum(x_e[i]**2))
-
-    # print(x_lorentz)
-
-    # print(x_lorentz[:, 1:]/(x_lorentz[:, :1]+1))
 
     # 平均次数が少なくなるように手で調整する用
     print('average degree:', np.sum(adj_mat) / len(adj_mat))
@@ -997,6 +1001,22 @@ if __name__ == '__main__':
         adj_mat=adj_mat,
         params_dataset=params_dataset
     )
+
+    # negative samplingの比率を平均次数から決定
+    pos_train_graph = len(np.where(train_graph == 1)[0])
+    neg_train_graph = len(np.where(train_graph == 0)[0])
+    # print(pos_train_graph)
+    ratio = neg_train_graph / pos_train_graph
+    print("ratio:", ratio)
+
+    # ratio=10
+
+    n_max_negatives = int(n_max_positives * ratio)
+    print("n_max_negatives:", n_max_negatives)
+    lr_embeddings = 0.1
+    lr_epoch_10 = 10.0 * \
+        (burn_batch_size * (n_max_positives + n_max_negatives)) / \
+        32 / 100  # batchサイズに対応して学習率変更
 
     for model_n_dim in model_n_dims:
         # basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive = DNML_HGG(
@@ -1028,7 +1048,7 @@ if __name__ == '__main__':
         # AIC_naive_list.append(AIC_naive)
         # BIC_naive_list.append(BIC_naive)
 
-        basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation = LinkPrediction(
+        basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation, model = LinkPrediction(
             adj_mat=adj_mat,
             train_graph=train_graph,
             positive_samples=positive_samples,
@@ -1066,6 +1086,8 @@ if __name__ == '__main__':
         AUC_list.append(AUC)
         GT_AUC_list.append(GT_AUC)
         Cor_list.append(correlation)
+
+        torch.save(model.state_dict(), "result_" + str(model_n_dim) + ".pth")
 
         # CV_score = CV_HGG(
         #     adj_mat=adj_mat,
