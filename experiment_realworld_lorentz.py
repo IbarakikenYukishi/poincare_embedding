@@ -12,32 +12,33 @@ from lorentz import CV_HGG, DNML_HGG, LinkPrediction, create_test_for_link_predi
 import torch.multiprocessing as multi
 from functools import partial
 from scipy.io import mmread
+from scipy.sparse import coo_matrix
+import os
 
 
-RESULTS="results"
+RESULTS = "results"
+
 
 def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
+    data = np.load('dataset/' + dataset_name +
+                   '/data.npy', allow_pickle=True).item()
+    adj_mat = data["adj_mat"].toarray()
+    positive_samples = data["positive_samples"]
+    negative_samples = data["negative_samples"]
+    train_graph = data["train_graph"].toarray()
+    lik_data = data["lik_data"]
 
-    adj_mat = np.load('dataset/' + dataset_name + '/' + dataset_name + '.npy')
-    positive_samples = np.load(
-        'dataset/' + dataset_name + '/positive_samples.npy')
-    negative_samples = np.load(
-        'dataset/' + dataset_name + '/negative_samples.npy')
-    train_graph = np.load('dataset/' + dataset_name + '/train_graph.npy')
-    lik_data = np.load('dataset/' + dataset_name + '/lik_data.npy')
-
-    # print(adj_mat)
     print("n_nodes:", len(adj_mat))
     print("n_edges:", np.sum(adj_mat))
     n_nodes = len(adj_mat)
 
     params_dataset = {
         'n_nodes': n_nodes,
-        'R': np.log(n_nodes) - 0.5,
+        'R': np.log(n_nodes),
     }
 
     # パラメータ
-    burn_epochs = 300
+    burn_epochs = 500
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     n_max_negatives = n_max_positives * 10
@@ -48,7 +49,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     lr_beta = 0.001
     lr_sigma = 0.001
     sigma_max = 1.0
-    sigma_min = 0.001
+    sigma_min = 0.1
     beta_min = 0.1
     beta_max = 10.0
     # それ以外
@@ -58,8 +59,6 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     sparse = False
 
     device = "cuda:" + str(device_idx)
-
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # 平均次数が少なくなるように手で調整する用
     print('average degree:', np.sum(adj_mat) / len(adj_mat))
@@ -76,7 +75,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     CV_score_list = []
     AUC_list = []
 
-    basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, _, _ = LinkPrediction(
+    basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, _, _, model = LinkPrediction(
         adj_mat=adj_mat,
         train_graph=train_graph,
         positive_samples=positive_samples,
@@ -103,6 +102,9 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         sparse=False,
         calc_groundtruth=False
     )
+    torch.save(model.state_dict(), RESULTS + "/" + dataset_name +
+               "/result_" + str(model_n_dim) + ".pth")
+
     basescore_y_and_z_list.append(basescore_y_and_z)
     basescore_y_given_z_list.append(basescore_y_given_z)
     basescore_z_list.append(basescore_z)
@@ -143,8 +145,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     result["beta_max"] = beta_max
     result["beta_min"] = beta_min
 
-
-    result.to_csv(RESULTS+"/" + dataset_name + "/result_" +
+    result.to_csv(RESULTS + "/" + dataset_name + "/result_" +
                   str(model_n_dim) + ".csv", index=False)
 
 
@@ -168,8 +169,6 @@ def data_generation(dataset_name):
     adj_mat = adj_mat.astype(np.int)
     print("n_nodes:", n_nodes)
 
-    np.save('dataset/' + dataset_name + "/" + dataset_name + ".npy", adj_mat)
-
     params_dataset = {
         "n_nodes": n_nodes
     }
@@ -177,12 +176,15 @@ def data_generation(dataset_name):
     positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
         adj_mat, params_dataset)
 
-    np.save('dataset/' + dataset_name +
-            "/positive_samples.npy", positive_samples)
-    np.save('dataset/' + dataset_name +
-            "/negative_samples.npy", negative_samples)
-    np.save('dataset/' + dataset_name + "/train_graph.npy", train_graph)
-    np.save('dataset/' + dataset_name + "/lik_data.npy", lik_data)
+    data = {
+        "adj_mat": coo_matrix(adj_mat),
+        "positive_samples": positive_samples,
+        "negative_samples": negative_samples,
+        "train_graph": coo_matrix(train_graph),
+        "lik_data": lik_data,
+    }
+
+    np.save('dataset/' + dataset_name + "/data.npy", data)
 
 
 if __name__ == '__main__':
@@ -207,6 +209,8 @@ if __name__ == '__main__':
     elif int(args.dataset) == 3:
         dataset_name = "ca-CondMat"
 
-    data_generation(dataset_name)
+    os.makedirs(RESULTS + "/" + dataset_name, exist_ok=True)
+
+    # data_generation(dataset_name)
     calc_metrics_realworld(dataset_name=dataset_name, device_idx=int(
         args.device), model_n_dim=int(args.n_dim))

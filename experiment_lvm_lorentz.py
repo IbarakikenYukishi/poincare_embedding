@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from lorentz import LinkPrediction
 import torch.multiprocessing as multi
 from functools import partial
+from scipy.sparse import coo_matrix
 import os
 
 RESULTS = "results"
@@ -25,21 +26,25 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         dataset = np.load('dataset/dim_' + str(n_dim) + '/graph_' + str(n_nodes) + '_' + str(n_graph) +
                           '.npy', allow_pickle='TRUE').item()  # object型なので、itemを付けないと辞書として使えない。
         adj_mat = dataset["adj_mat"]
+        # print(adj_mat)
+        adj_mat = adj_mat.toarray()
+        # print(adj_mat)
         params_dataset = dataset["params_adj_mat"]
         positive_samples = dataset["positive_samples"]
         negative_samples = dataset["negative_samples"]
         train_graph = dataset["train_graph"]
+        train_graph = train_graph.toarray()
         lik_data = dataset["lik_data"]
-        x_e = dataset["x_e"]
+        x_lorentz = dataset["x_e"]
         # 真のローレンツ座標
-        x_lorentz = np.zeros(
-            (params_dataset['n_nodes'], params_dataset['n_dim'] + 1))
-        for i in range(params_dataset['n_nodes']):
-            x_lorentz[i, 0] = (1 + np.sum(x_e[i]**2)) / (1 - np.sum(x_e[i]**2))
-            x_lorentz[i, 1:] = 2 * x_e[i] / (1 - np.sum(x_e[i]**2))
+        # x_lorentz = np.zeros(
+        #     (params_dataset['n_nodes'], params_dataset['n_dim'] + 1))
+        # for i in range(params_dataset['n_nodes']):
+        #     x_lorentz[i, 0] = (1 + np.sum(x_e[i]**2)) / (1 - np.sum(x_e[i]**2))
+        #     x_lorentz[i, 1:] = 2 * x_e[i] / (1 - np.sum(x_e[i]**2))
 
         # パラメータ
-        burn_epochs = 300
+        burn_epochs = 500
         burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
         n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
         n_max_negatives = n_max_positives * 10
@@ -50,9 +55,9 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         lr_beta = 0.001
         lr_sigma = 0.001
         sigma_max = 1.0
-        sigma_min = 0.001
-        beta_min = 0.1
+        sigma_min = 0.1
         beta_max = 10.0
+        beta_min = 0.1
 
         # それ以外
         loader_workers = 16
@@ -81,7 +86,7 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         Cor_list = []
 
         for model_n_dim in model_n_dims:
-            basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation = LinkPrediction(
+            basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation, model = LinkPrediction(
                 adj_mat=adj_mat,
                 train_graph=train_graph,
                 positive_samples=positive_samples,
@@ -119,6 +124,8 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
             AUC_list.append(AUC)
             GT_AUC_list.append(GT_AUC)
             Cor_list.append(correlation)
+            torch.save(model.state_dict(), RESULTS + "/dim_" + str(n_dim) + "/result_" + str(n_dim) + "_" + str(n_nodes) +
+                       "_" + str(n_graph) + ".pth")
 
         result["model_n_dims"] = model_n_dims
         result["n_nodes"] = params_dataset["n_nodes"]
@@ -150,9 +157,7 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         result["beta_max"] = beta_max
         result["beta_min"] = beta_min
 
-        os.makedirs(RESULTS + "/", exist_ok=True)
-
-        result.to_csv(RESULTS + "/Dim" + str(n_dim) + "/result_" + str(n_dim) + "_" + str(n_nodes) +
+        result.to_csv(RESULTS + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
                       "_" + str(n_graph) + ".csv", index=False)
 
 
@@ -169,13 +174,15 @@ if __name__ == '__main__':
     print(args)
 
     n_nodes_list = [400, 800, 1600, 3200, 6400]
+    model_n_dims = [2, 4, 8, 16, 32]
 
-    if int(args.n_dim) == 8:
-        model_n_dims = [2, 4, 8, 16]
-    elif int(args.n_dim) == 16:
-        model_n_dims = [2, 4, 8, 16, 32]
+    # if int(args.n_dim) == 8:
+    #     model_n_dims = [2, 4, 8, 16]
+    # elif int(args.n_dim) == 16:
+    #     model_n_dims = [2, 4, 8, 16, 32]
+    os.makedirs(RESULTS + "/dim_" + args.n_dim + "/", exist_ok=True)
 
     for n_nodes in n_nodes_list:
 
         calc_metrics(device_idx=int(args.device), n_dim=int(args.n_dim),
-                     n_nodes=n_nodes, n_graphs=10, n_devices=4, model_n_dims=model_n_dims)
+                     n_nodes=n_nodes, n_graphs=12, n_devices=4, model_n_dims=model_n_dims)
