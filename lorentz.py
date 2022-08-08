@@ -156,7 +156,8 @@ class Lorentz(nn.Module):
         # beta_max,
         init_range=0.01,
         sparse=True,
-        device="cpu"
+        device="cpu",
+        calc_latent=True
     ):
         super().__init__()
         self.n_nodes = n_nodes
@@ -172,6 +173,7 @@ class Lorentz(nn.Module):
         self.R = R
         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
         self.device = device
+        self.calc_latent = calc_latent
 
         self.I_D = torch.zeros(self.n_dim - 1)  # 0番目は空
         for j in range(1, self.n_dim - 1):
@@ -303,10 +305,10 @@ class Lorentz(nn.Module):
         us = self.table(pairs[:, 0])
         vs = self.table(pairs[:, 1])
 
-        lik_us = self.latent_lik(us)
-        lik_vs = self.latent_lik(vs)
-
-        loss = loss + (lik_us + lik_vs) / (self.n_nodes - 1)
+        if self.calc_latent:  # calc_latentがTrueの時のみ計算する
+            lik_us = self.latent_lik(us)
+            lik_vs = self.latent_lik(vs)
+            loss = loss + (lik_us + lik_vs) / (self.n_nodes - 1)
 
         return loss
 
@@ -614,7 +616,7 @@ def LinkPrediction(
 
     # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
     # 平均次数とかから逆算できる気がする。
-    model = Lorentz(
+    model_latent = Lorentz(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
@@ -626,11 +628,39 @@ def LinkPrediction(
         beta=1.0,
         init_range=0.001,
         sparse=sparse,
-        device=device
+        device=device,
+        calc_latent=True
+    )
+    model_naive = Lorentz(
+        n_nodes=params_dataset['n_nodes'],
+        n_dim=model_n_dim,  # モデルの次元
+        R=params_dataset['R'],
+        sigma=1.0,
+        # beta_min=beta_min,
+        # beta_max=beta_max,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        beta=1.0,
+        init_range=0.001,
+        sparse=sparse,
+        device=device,
+        calc_latent=False
     )
     # 最適化関数。
-    rsgd = RSGD(
-        model.parameters(),
+    rsgd_latent = RSGD(
+        model_latent.parameters(),
+        lr_embeddings=lr_embeddings,
+        lr_beta=lr_beta,
+        lr_sigma=lr_sigma,
+        R=params_dataset['R'],
+        # sigma_max=sigma_max,
+        # sigma_min=sigma_min,
+        beta_max=beta_max,
+        beta_min=beta_min,
+        device=device
+    )
+    rsgd_naive = RSGD(
+        model_naive.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
         lr_sigma=lr_sigma,
@@ -642,9 +672,10 @@ def LinkPrediction(
         device=device
     )
 
-    model.to(device)
+    model_latent.to(device)
+    model_naive.to(device)
 
-    loss_history = []
+    # loss_history = []
 
     start = time.time()
 
@@ -653,10 +684,12 @@ def LinkPrediction(
         #     rsgd.param_groups[0]["lr_embeddings"] /= 5
         if epoch == 10:
             # batchサイズに対応して学習率変更
-            rsgd.param_groups[0]["lr_embeddings"] = lr_epoch_10
+            rsgd_latent.param_groups[0]["lr_embeddings"] = lr_epoch_10
+            rsgd_naive.param_groups[0]["lr_embeddings"] = lr_epoch_10
 
-        losses = []
-        model.sigma_hat()
+        losses_latent = []
+        losses_naive = []
+        model_latent.sigma_hat()
         # model.beta_hat(
         #     train_graph=train_graph,
         #     n_samples=int(len(train_graph)*0.5)
@@ -668,15 +701,23 @@ def LinkPrediction(
             pairs = pairs.to(device)
             labels = labels.to(device)
 
-            rsgd.zero_grad()
-            loss = model(pairs, labels).mean()
-            loss.backward()
-            rsgd.step()
-            losses.append(loss)
+            rsgd_latent.zero_grad()
+            loss_latent = model_latent(pairs, labels).mean()
+            loss_latent.backward()
+            rsgd_latent.step()
+            losses_latent.append(loss_latent)
 
-        loss_history.append(torch.Tensor(losses).mean().item())
+            rsgd_naive.zero_grad()
+            loss_naive = model_naive(pairs, labels).mean()
+            loss_naive.backward()
+            rsgd_naive.step()
+            losses_naive.append(loss_naive)
+
+        # loss_history.append(torch.Tensor(losses).mean().item())
         print("epoch:", epoch, ", loss:",
-              torch.Tensor(losses).mean().item())
+              torch.Tensor(losses_latent).mean().item())
+        print("loss_naive:",
+              torch.Tensor(losses_naive).mean().item())
 
     elapsed_time = time.time() - start
     print("elapsed_time:{0}".format(elapsed_time) + "[sec]")
@@ -696,24 +737,35 @@ def LinkPrediction(
     # -2*log(p)の計算
     # basescore_y_and_z = 0
     basescore_y_given_z = 0
+    basescore_y_given_z_naive = 0
     for pairs, labels in dataloader_all:
         pairs = pairs.to(device)
         labels = labels.to(device)
 
         # basescore_y_and_z += model(pairs, labels).sum().item()
-        basescore_y_given_z += model.lik_y_given_z(pairs, labels).sum().item()
+        basescore_y_given_z += model_latent.lik_y_given_z(pairs, labels).sum().item()
+        basescore_y_given_z_naive += model_naive.lik_y_given_z(
+            pairs, labels).sum().item()
 
-    basescore_z = model.z()
+    basescore_z = model_latent.z()
 
     basescore_y_given_z = basescore_y_given_z * (n_data / len(lik_data)) / 2
+    basescore_y_given_z_naive = basescore_y_given_z_naive * \
+        (n_data / len(lik_data)) / 2
+
     basescore_y_and_z = basescore_y_given_z + basescore_z
 
-    AIC_naive = basescore_y_given_z + \
+    AIC_naive_from_latent = basescore_y_given_z + \
         (params_dataset['n_nodes'] * model_n_dim + 1)
-    BIC_naive = basescore_y_given_z + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
+    BIC_naive_from_latent = basescore_y_given_z + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
         np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
 
-    pc_first, pc_second = model.get_PC(
+    AIC_naive = basescore_y_given_z_naive + \
+        (params_dataset['n_nodes'] * model_n_dim + 1)
+    BIC_naive = basescore_y_given_z_naive + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
+        np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
+
+    pc_first, pc_second = model_latent.get_PC(
         sigma_max, sigma_min, beta_max, beta_min, sampling=True)
     DNML_codelength = basescore_y_and_z + pc_first + pc_second
 
@@ -721,14 +773,26 @@ def LinkPrediction(
     # positive_prob = model.calc_probability(positive_samples)
     # negative_prob = model.calc_probability(negative_samples)
 
-    positive_prob = -model.calc_dist(positive_samples)
-    negative_prob = -model.calc_dist(negative_samples)
+    # latentを計算したものでのAUC
+    positive_prob = -model_latent.calc_dist(positive_samples)
+    negative_prob = -model_latent.calc_dist(negative_samples)
 
     pred = np.append(positive_prob, negative_prob)
     ground_truth = np.append(np.ones(len(positive_prob)),
                              np.zeros(len(negative_prob)))
 
-    AUC = metrics.roc_auc_score(ground_truth, pred)
+    AUC_latent = metrics.roc_auc_score(ground_truth, pred)
+
+    # naiveでのAUC
+    positive_prob = -model_naive.calc_dist(positive_samples)
+    negative_prob = -model_naive.calc_dist(negative_samples)
+
+    pred = np.append(positive_prob, negative_prob)
+    ground_truth = np.append(np.ones(len(positive_prob)),
+                             np.zeros(len(negative_prob)))
+
+    AUC_naive = metrics.roc_auc_score(ground_truth, pred)
+
 
     if calc_groundtruth:
 
@@ -755,32 +819,63 @@ def LinkPrediction(
         gt_r = torch.Tensor(x_lorentz[:, 0])
         gt_r = torch.max(gt_r, torch.Tensor([1.0 + 0.00001]))
 
-        es_r = torch.Tensor(model.get_lorentz_table()[:, 0])
+        es_r_latent = torch.Tensor(model_latent.get_lorentz_table()[:, 0])
+        es_r_naive = torch.Tensor(model_naive.get_lorentz_table()[:, 0])
         # es_r = torch.max(es_r, torch.Tensor([1.0 + 0.00001]))
         # es_r = torch.where(es_r <= 1.0+0.00001, torch.Tensor([1.0+0.0001]), es_r)[:, 0]
 
         print(gt_r)
-        print(es_r)
+        print(es_r_latent)
+        print(es_r_naive)
 
         gt_r = arcosh(gt_r)
-        es_r = arcosh(es_r)
+        es_r_latent = arcosh(es_r_latent)
+        es_r_naive = arcosh(es_r_naive)
 
-        correlation, _ = stats.spearmanr(gt_r, es_r)
-        print("Cor:", correlation)
+        cor_latent, _ = stats.spearmanr(gt_r, es_r_latent)
+        cor_naive, _ = stats.spearmanr(gt_r, es_r_naive)
+        print("cor_latent:", cor_latent)
+        print("cor_naive:", cor_naive)
 
     else:
         GT_AUC = None
-        correlation = None
+        cor_latent = None
+        cor_naive = None
 
     print("p(y, z; theta):", basescore_y_and_z)
     print("p(y|z; theta):", basescore_y_given_z)
     print("p(z; theta):", basescore_z)
+    print("p(y; z, theta):", basescore_y_given_z_naive)
     print("DNML:", DNML_codelength)
-    print("AIC naive:", AIC_naive)
+    print("AIC_naive:", AIC_naive)
     print("BIC_naive:", BIC_naive)
-    print("AUC:", AUC)
+    print("AIC_naive_from_latent:", AIC_naive_from_latent)
+    print("BIC_naive_from_latent:", BIC_naive_from_latent)
+    print("AUC_latent:", AUC_latent)
+    print("AUC_naive:", AUC_naive)
 
-    return basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation, model
+    ret = {
+        "basescore_y_and_z": basescore_y_and_z,
+        "basescore_y_given_z": basescore_y_given_z,
+        "basescore_z": basescore_z,
+        "basescore_y_given_z_naive": basescore_y_given_z_naive,
+        "DNML_codelength": DNML_codelength,
+        "pc_first": pc_first,
+        "pc_second": pc_second,
+        "AIC_naive": AIC_naive,
+        "BIC_naive": BIC_naive,
+        "AIC_naive_from_latent": AIC_naive_from_latent,
+        "BIC_naive_from_latent": BIC_naive_from_latent,
+        "AUC_latent": AUC_latent,
+        "AUC_naive": AUC_naive,
+        "GT_AUC": GT_AUC,
+        "cor_latent": cor_latent,
+        "cor_naive": cor_naive,
+        "model_latent": model_latent,
+        "model_naive": model_naive
+    }
+
+    return ret
 
 
 def DNML_HGG(
@@ -980,15 +1075,20 @@ if __name__ == '__main__':
     basescore_y_and_z_list = []
     basescore_y_given_z_list = []
     basescore_z_list = []
+    basescore_y_given_z_naive_list = []
     DNML_codelength_list = []
     pc_first_list = []
     pc_second_list = []
     AIC_naive_list = []
     BIC_naive_list = []
+    AIC_naive_from_latent_list = []
+    BIC_naive_from_latent_list = []
     CV_score_list = []
-    AUC_list = []
+    AUC_latent_list = []
+    AUC_naive_list = []
     GT_AUC_list = []
-    Cor_list = []
+    cor_latent_list = []
+    cor_naive_list = []
 
     model_n_dims = [4, 8, 16, 32, 64]
     # model_n_dims = [16, 32, 64]
@@ -1048,7 +1148,10 @@ if __name__ == '__main__':
         # AIC_naive_list.append(AIC_naive)
         # BIC_naive_list.append(BIC_naive)
 
-        basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation, model = LinkPrediction(
+        # basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength,
+        # pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation,
+        # model = LinkPrediction(
+        ret = LinkPrediction(
             adj_mat=adj_mat,
             train_graph=train_graph,
             positive_samples=positive_samples,
@@ -1075,19 +1178,28 @@ if __name__ == '__main__':
             sparse=False,
             calc_groundtruth=True
         )
-        basescore_y_and_z_list.append(basescore_y_and_z)
-        basescore_y_given_z_list.append(basescore_y_given_z)
-        basescore_z_list.append(basescore_z)
-        DNML_codelength_list.append(DNML_codelength)
-        pc_first_list.append(pc_first)
-        pc_second_list.append(pc_second)
-        AIC_naive_list.append(AIC_naive)
-        BIC_naive_list.append(BIC_naive)
-        AUC_list.append(AUC)
-        GT_AUC_list.append(GT_AUC)
-        Cor_list.append(correlation)
 
-        torch.save(model.state_dict(), "result_" + str(model_n_dim) + ".pth")
+        basescore_y_and_z_list.append(ret["basescore_y_and_z"])
+        basescore_y_given_z_list.append(ret["basescore_y_given_z"])
+        basescore_z_list.append(ret["basescore_z"])
+        basescore_y_given_z_naive_list.append(ret["basescore_y_given_z_naive"])
+        DNML_codelength_list.append(ret["DNML_codelength"])
+        pc_first_list.append(ret["pc_first"])
+        pc_second_list.append(ret["pc_second"])
+        AIC_naive_list.append(ret["AIC_naive"])
+        BIC_naive_list.append(ret["BIC_naive"])
+        AIC_naive_from_latent_list.append(ret["AIC_naive_from_latent"])
+        BIC_naive_from_latent_list.append(ret["BIC_naive_from_latent"])
+        AUC_latent_list.append(ret["AUC_latent"])
+        AUC_naive_list.append(ret["AUC_naive"])
+        GT_AUC_list.append(ret["GT_AUC"])
+        cor_latent_list.append(ret["cor_latent"])
+        cor_naive_list.append(ret["cor_naive"])
+
+        torch.save(ret["model_latent"].state_dict(),
+                   "temp/result_" + str(model_n_dim) + "_latent.pth")
+        torch.save(ret["model_naive"].state_dict(),
+                   "temp/result_" + str(model_n_dim) + "_naive.pth")
 
         # CV_score = CV_HGG(
         #     adj_mat=adj_mat,
@@ -1119,12 +1231,17 @@ if __name__ == '__main__':
     result["DNML_codelength"] = DNML_codelength_list
     result["AIC_naive"] = AIC_naive_list
     result["BIC_naive"] = BIC_naive_list
-    result["AUC"] = AUC_list
+    result["AIC_naive_from_latent"] = AIC_naive_from_latent_list
+    result["BIC_naive_from_latent"] = BIC_naive_from_latent_list
+    result["AUC_latent"] = AUC_latent_list
+    result["AUC_naive"] = AUC_naive_list
     result["GT_AUC"] = GT_AUC_list
-    result["Cor"] = Cor_list
+    result["cor_latent"] = cor_latent_list
+    result["cor_naive"] = cor_naive_list
     result["basescore_y_and_z"] = basescore_y_and_z_list
     result["basescore_y_given_z"] = basescore_y_given_z_list
     result["basescore_z"] = basescore_z_list
+    result["basescore_y_given_z_naive"] = basescore_y_given_z_naive_list
     result["pc_first"] = pc_first_list
     result["pc_second"] = pc_second_list
     result["burn_epochs"] = burn_epochs

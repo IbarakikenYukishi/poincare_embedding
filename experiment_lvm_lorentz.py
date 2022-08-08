@@ -17,10 +17,17 @@ import os
 RESULTS = "results"
 
 
-def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
+def calc_metrics(
+    partition_idx,
+    n_dim,
+    n_nodes,
+    n_graphs,
+    n_partitions,
+    n_devices,
+    model_n_dims
+):
 
-    # for n_graph in range(n_graphs):
-    for n_graph in range(int(n_graphs * device_idx / n_devices), int(n_graphs * (device_idx + 1) / n_devices)):
+    for n_graph in range(int(n_graphs * partition_idx / n_partitions), int(n_graphs * (partition_idx + 1) / n_partitions)):
         print(n_graph)
 
         dataset = np.load('dataset/dim_' + str(n_dim) + '/graph_' + str(n_nodes) + '_' + str(n_graph) +
@@ -36,15 +43,9 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         train_graph = train_graph.toarray()
         lik_data = dataset["lik_data"]
         x_lorentz = dataset["x_e"]
-        # 真のローレンツ座標
-        # x_lorentz = np.zeros(
-        #     (params_dataset['n_nodes'], params_dataset['n_dim'] + 1))
-        # for i in range(params_dataset['n_nodes']):
-        #     x_lorentz[i, 0] = (1 + np.sum(x_e[i]**2)) / (1 - np.sum(x_e[i]**2))
-        #     x_lorentz[i, 1:] = 2 * x_e[i] / (1 - np.sum(x_e[i]**2))
 
         # パラメータ
-        burn_epochs = 500
+        burn_epochs = 800
         burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
         n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
         n_max_negatives = n_max_positives * 10
@@ -65,7 +66,7 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         shuffle = True
         sparse = False
 
-        device = "cuda:" + str(device_idx)
+        device = "cuda:" + str(partition_idx % n_devices)
         # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         # 平均次数が少なくなるように手で調整する用
@@ -75,18 +76,23 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         basescore_y_and_z_list = []
         basescore_y_given_z_list = []
         basescore_z_list = []
+        basescore_y_given_z_naive_list = []
         DNML_codelength_list = []
         pc_first_list = []
         pc_second_list = []
         AIC_naive_list = []
         BIC_naive_list = []
+        AIC_naive_from_latent_list = []
+        BIC_naive_from_latent_list = []
         CV_score_list = []
-        AUC_list = []
+        AUC_latent_list = []
+        AUC_naive_list = []
         GT_AUC_list = []
-        Cor_list = []
+        cor_latent_list = []
+        cor_naive_list = []
 
         for model_n_dim in model_n_dims:
-            basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation, model = LinkPrediction(
+            ret = LinkPrediction(
                 adj_mat=adj_mat,
                 train_graph=train_graph,
                 positive_samples=positive_samples,
@@ -113,19 +119,27 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
                 sparse=False,
                 calc_groundtruth=True
             )
-            basescore_y_and_z_list.append(basescore_y_and_z)
-            basescore_y_given_z_list.append(basescore_y_given_z)
-            basescore_z_list.append(basescore_z)
-            DNML_codelength_list.append(DNML_codelength)
-            pc_first_list.append(pc_first)
-            pc_second_list.append(pc_second)
-            AIC_naive_list.append(AIC_naive)
-            BIC_naive_list.append(BIC_naive)
-            AUC_list.append(AUC)
-            GT_AUC_list.append(GT_AUC)
-            Cor_list.append(correlation)
-            torch.save(model.state_dict(), RESULTS + "/dim_" + str(n_dim) + "/result_" + str(n_dim) + "_" + str(n_nodes) +
-                       "_" + str(n_graph) + ".pth")
+            basescore_y_and_z_list.append(ret["basescore_y_and_z"])
+            basescore_y_given_z_list.append(ret["basescore_y_given_z"])
+            basescore_z_list.append(ret["basescore_z"])
+            basescore_y_given_z_naive_list.append(
+                ret["basescore_y_given_z_naive"])
+            DNML_codelength_list.append(ret["DNML_codelength"])
+            pc_first_list.append(ret["pc_first"])
+            pc_second_list.append(ret["pc_second"])
+            AIC_naive_list.append(ret["AIC_naive"])
+            BIC_naive_list.append(ret["BIC_naive"])
+            AIC_naive_from_latent_list.append(ret["AIC_naive_from_latent"])
+            BIC_naive_from_latent_list.append(ret["BIC_naive_from_latent"])
+            AUC_latent_list.append(ret["AUC_latent"])
+            AUC_naive_list.append(ret["AUC_naive"])
+            GT_AUC_list.append(ret["GT_AUC"])
+            cor_latent_list.append(ret["cor_latent"])
+            cor_naive_list.append(ret["cor_naive"])
+            torch.save(ret["model_latent"].state_dict(), RESULTS + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
+                       "_" + str(n_graph) + "_latent.pth")
+            torch.save(ret["model_naive"].state_dict(), RESULTS + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
+                       "_" + str(n_graph) + "_naive.pth")
 
         result["model_n_dims"] = model_n_dims
         result["n_nodes"] = params_dataset["n_nodes"]
@@ -136,12 +150,17 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         result["DNML_codelength"] = DNML_codelength_list
         result["AIC_naive"] = AIC_naive_list
         result["BIC_naive"] = BIC_naive_list
-        result["AUC"] = AUC_list
+        result["AIC_naive_from_latent"] = AIC_naive_from_latent_list
+        result["BIC_naive_from_latent"] = BIC_naive_from_latent_list
+        result["AUC_latent"] = AUC_latent_list
+        result["AUC_naive"] = AUC_naive_list
         result["GT_AUC"] = GT_AUC_list
-        result["Cor"] = Cor_list
+        result["cor_latent"] = cor_latent_list
+        result["cor_naive"] = cor_naive_list
         result["basescore_y_and_z"] = basescore_y_and_z_list
         result["basescore_y_given_z"] = basescore_y_given_z_list
         result["basescore_z"] = basescore_z_list
+        result["basescore_y_given_z_naive"] = basescore_y_given_z_naive_list
         result["pc_first"] = pc_first_list
         result["pc_second"] = pc_second_list
         result["burn_epochs"] = burn_epochs
@@ -157,7 +176,7 @@ def calc_metrics(device_idx, n_dim, n_nodes, n_graphs, n_devices, model_n_dims):
         result["beta_max"] = beta_max
         result["beta_min"] = beta_min
 
-        result.to_csv(RESULTS + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
+        result.to_csv(RESULTS + "/dim_" + str(n_dim) + "/result_" + str(n_nodes) +
                       "_" + str(n_graph) + ".csv", index=False)
 
 
@@ -169,12 +188,16 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='HGG')
     parser.add_argument('n_dim', help='n_dim')
-    parser.add_argument('device', help='device')
+    parser.add_argument('partition', help='partition')
     args = parser.parse_args()
     print(args)
 
     n_nodes_list = [400, 800, 1600, 3200, 6400]
-    model_n_dims = [2, 4, 8, 16, 32]
+    model_n_dims = [2, 4, 8, 16, 32, 64]
+
+    n_partitions = 12
+    n_devices = 4
+    n_graphs = 12
 
     # if int(args.n_dim) == 8:
     #     model_n_dims = [2, 4, 8, 16]
@@ -183,6 +206,12 @@ if __name__ == '__main__':
     os.makedirs(RESULTS + "/dim_" + args.n_dim + "/", exist_ok=True)
 
     for n_nodes in n_nodes_list:
-
-        calc_metrics(device_idx=int(args.device), n_dim=int(args.n_dim),
-                     n_nodes=n_nodes, n_graphs=12, n_devices=4, model_n_dims=model_n_dims)
+        calc_metrics(
+            partition_idx=int(args.partition),
+            n_dim=int(args.n_dim),
+            n_nodes=n_nodes,
+            n_graphs=n_graphs,
+            n_partitions=n_partitions,
+            n_devices=n_devices,
+            model_n_dims=model_n_dims
+        )
