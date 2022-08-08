@@ -15,9 +15,9 @@ RESULTS = "results"
 
 def artificial():
 
-    D_true_list = [8, 16]
+    D_true_list = [4, 8, 16]
     n_nodes_list = [400, 800, 1600, 3200, 6400]
-    n_graphs = 10
+    n_graphs = 12
     T_gap = 2
 
     for D_true in D_true_list:
@@ -43,11 +43,9 @@ def artificial():
             bene_MinGE = []
 
             for n_graph in range(n_graphs):
-                result = pd.read_csv(RESULTS + "/Dim" + str(D_true) + "/result_" +
-                                     str(D_true) + "_" + str(n_nodes) + "_" + str(n_graph) + ".csv")
+                result = pd.read_csv(RESULTS + "/dim_" + str(D_true) + "/result_" + str(n_nodes) + "_" + str(n_graph) + ".csv")
                 result = result.fillna(9999999999999)
-                result_MinGE = pd.read_csv(RESULTS + "/Dim" + str(D_true) + "/result_" +
-                                           str(D_true) + "_" + str(n_nodes) + "_" + str(n_graph) + "_MinGE.csv")
+                result_MinGE = pd.read_csv(RESULTS + "/dim_" + str(D_true) + "/result_" + str(n_nodes) + "_" + str(n_graph) + "_MinGE.csv")
 
                 # if D_true<=16:
                 #     result = result.drop(result.index[[5]])
@@ -121,7 +119,7 @@ def artificial():
                 ax.set_ylabel("Normalized Criterion", fontsize=20)
                 plt.tight_layout()
 
-                plt.savefig(RESULTS + "/Dim" + str(D_true) + "_10.0/result_" +
+                plt.savefig(RESULTS + "/dim_" + str(D_true) + "/result_" +
                             str(D_true) + "_" + str(n_nodes) + "_" + str(n_graph) + ".png")
 
             bene_DNML = np.array(bene_DNML)

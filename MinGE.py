@@ -7,6 +7,8 @@ from copy import deepcopy
 import pandas as pd
 from scipy.sparse import csr_matrix, csc_matrix, coo_matrix, lil_matrix
 
+RESULTS = "results"
+
 
 def integral_sin(n, theta):
     if n == 0:
@@ -112,10 +114,12 @@ def artificial_dataset(dim_true):
     weight_entropy = 1.0
     # dim_true = 16
     n_nodes_list = [400, 800, 1600, 3200, 6400]
-    n_graphs = 10
+    n_graphs = 12
 
-    if dim_true == 8:
-        n_dim_list = [2, 4, 8, 16]
+    if dim_true == 4:
+        n_dim_list = [2, 4, 8, 16, 32]
+    elif dim_true == 8:
+        n_dim_list = [2, 4, 8, 16, 32]
     elif dim_true == 16:
         n_dim_list = [2, 4, 8, 16, 32]
 
@@ -130,7 +134,7 @@ def artificial_dataset(dim_true):
             entropy_list = np.array(entropy_list)
             result["model_n_dims"] = n_dim_list
             result["MinGE"] = entropy_list
-            result.to_csv("results/Dim"+str(dim_true)+"/result_" + str(dim_true) + "_" + str(n_nodes) +
+            result.to_csv(RESULTS + "/dim_"+str(dim_true)+"/result_" + str(n_nodes) +
                           "_" + str(n_graph) + "_MinGE.csv", index=False)
             print("estimated dimensionality:",
                   n_dim_list[np.argmin(entropy_list)])
@@ -185,7 +189,7 @@ def mammal_dataset(n_dim_list):
     entropy_list = np.array(entropy_list)
     result["model_n_dims"] = n_dim_list
     result["MinGE"] = entropy_list
-    result.to_csv("results/mammals/result_MinGE.csv", index=False)
+    result.to_csv(RESULTS + "/mammals/result_MinGE.csv", index=False)
     print("estimated dimensionality:",
           n_dim_list[np.argmin(entropy_list)])
 
@@ -193,10 +197,10 @@ if __name__ == "__main__":
     weight_entropy = 1.0
 
     # artificial dataset
-    n_dim_true_list = [8, 16]
+    n_dim_true_list = [4, 8, 16]
 
-    for n_dim_true in n_dim_true_list:
-        artificial_dataset(n_dim_true)
+    # for n_dim_true in n_dim_true_list:
+    #     artificial_dataset(n_dim_true)
 
     # link prediction
     n_dim_list = [2, 4, 8, 16, 32, 64]
@@ -211,7 +215,7 @@ if __name__ == "__main__":
         result["model_n_dims"] = n_dim_list
         result["MinGE"] = entropy_list
 
-        result.to_csv("results/" + dataset_name +
+        result.to_csv(RESULTS + "/" + dataset_name +
                       "/result_MinGE.csv", index=False)
 
     # lexical dataset
