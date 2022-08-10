@@ -743,7 +743,8 @@ def LinkPrediction(
         labels = labels.to(device)
 
         # basescore_y_and_z += model(pairs, labels).sum().item()
-        basescore_y_given_z += model_latent.lik_y_given_z(pairs, labels).sum().item()
+        basescore_y_given_z += model_latent.lik_y_given_z(
+            pairs, labels).sum().item()
         basescore_y_given_z_naive += model_naive.lik_y_given_z(
             pairs, labels).sum().item()
 
@@ -792,7 +793,6 @@ def LinkPrediction(
                              np.zeros(len(negative_prob)))
 
     AUC_naive = metrics.roc_auc_score(ground_truth, pred)
-
 
     if calc_groundtruth:
 

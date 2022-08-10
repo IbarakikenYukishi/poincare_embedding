@@ -38,7 +38,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     }
 
     # パラメータ
-    burn_epochs = 500
+    burn_epochs = 800
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     n_max_negatives = n_max_positives * 10
@@ -67,15 +67,19 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     basescore_y_and_z_list = []
     basescore_y_given_z_list = []
     basescore_z_list = []
+    basescore_y_given_z_naive_list = []
     DNML_codelength_list = []
     pc_first_list = []
     pc_second_list = []
     AIC_naive_list = []
     BIC_naive_list = []
+    AIC_naive_from_latent_list = []
+    BIC_naive_from_latent_list = []
     CV_score_list = []
-    AUC_list = []
+    AUC_latent_list = []
+    AUC_naive_list = []
 
-    basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, AUC, _, _, model = LinkPrediction(
+    ret = LinkPrediction(
         adj_mat=adj_mat,
         train_graph=train_graph,
         positive_samples=positive_samples,
@@ -102,18 +106,24 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         sparse=False,
         calc_groundtruth=False
     )
-    torch.save(model.state_dict(), RESULTS + "/" + dataset_name +
-               "/result_" + str(model_n_dim) + ".pth")
+    torch.save(ret["model_latent"].state_dict(), RESULTS + "/" + dataset_name +
+               "/result_" + str(model_n_dim) + "_latent.pth")
+    torch.save(ret["model_naive"].state_dict(), RESULTS + "/" + dataset_name +
+               "/result_" + str(model_n_dim) + "_naive.pth")
 
-    basescore_y_and_z_list.append(basescore_y_and_z)
-    basescore_y_given_z_list.append(basescore_y_given_z)
-    basescore_z_list.append(basescore_z)
-    DNML_codelength_list.append(DNML_codelength)
-    pc_first_list.append(pc_first)
-    pc_second_list.append(pc_second)
-    AIC_naive_list.append(AIC_naive)
-    BIC_naive_list.append(BIC_naive)
-    AUC_list.append(AUC)
+    basescore_y_and_z_list.append(ret["basescore_y_and_z"])
+    basescore_y_given_z_list.append(ret["basescore_y_given_z"])
+    basescore_z_list.append(ret["basescore_z"])
+    basescore_y_given_z_naive_list.append(ret["basescore_y_given_z_naive"])
+    DNML_codelength_list.append(ret["DNML_codelength"])
+    pc_first_list.append(ret["pc_first"])
+    pc_second_list.append(ret["pc_second"])
+    AIC_naive_list.append(ret["AIC_naive"])
+    BIC_naive_list.append(ret["BIC_naive"])
+    AIC_naive_from_latent_list.append(ret["AIC_naive_from_latent"])
+    BIC_naive_from_latent_list.append(ret["BIC_naive_from_latent"])
+    AUC_latent_list.append(ret["AUC_latent"])
+    AUC_naive_list.append(ret["AUC_naive"])
 
     result["model_n_dims"] = [model_n_dim]
     result["n_nodes"] = [params_dataset["n_nodes"]]
@@ -124,12 +134,16 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     result["DNML_codelength"] = DNML_codelength_list
     result["AIC_naive"] = AIC_naive_list
     result["BIC_naive"] = BIC_naive_list
-    result["AUC"] = AUC_list
+    result["AIC_naive_from_latent"] = AIC_naive_from_latent_list
+    result["BIC_naive_from_latent"] = BIC_naive_from_latent_list
+    result["AUC_latent"] = AUC_latent_list
+    result["AUC_naive"] = AUC_naive_list
     # result["GT_AUC"] = GT_AUC_list
     # result["Cor"] = Cor_list
     result["basescore_y_and_z"] = basescore_y_and_z_list
     result["basescore_y_given_z"] = basescore_y_given_z_list
     result["basescore_z"] = basescore_z_list
+    result["basescore_y_given_z_naive"] = basescore_y_given_z_list
     result["pc_first"] = pc_first_list
     result["pc_second"] = pc_second_list
     result["burn_epochs"] = burn_epochs
@@ -211,6 +225,8 @@ if __name__ == '__main__':
 
     os.makedirs(RESULTS + "/" + dataset_name, exist_ok=True)
 
-    # data_generation(dataset_name)
+    if not os.path.exists('dataset/' + dataset_name + "/data.npy"):
+        data_generation(dataset_name)
+
     calc_metrics_realworld(dataset_name=dataset_name, device_idx=int(
         args.device), model_n_dim=int(args.n_dim))
