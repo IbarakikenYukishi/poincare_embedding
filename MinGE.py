@@ -117,11 +117,11 @@ def artificial_dataset(dim_true):
     n_graphs = 12
 
     if dim_true == 4:
-        n_dim_list = [2, 4, 8, 16, 32]
+        n_dim_list = [2, 4, 8, 16, 32, 64]
     elif dim_true == 8:
-        n_dim_list = [2, 4, 8, 16, 32]
+        n_dim_list = [2, 4, 8, 16, 32, 64]
     elif dim_true == 16:
-        n_dim_list = [2, 4, 8, 16, 32]
+        n_dim_list = [2, 4, 8, 16, 32, 64]
 
     for n_nodes in n_nodes_list:
         print(n_nodes)
@@ -134,14 +134,16 @@ def artificial_dataset(dim_true):
             entropy_list = np.array(entropy_list)
             result["model_n_dims"] = n_dim_list
             result["MinGE"] = entropy_list
-            result.to_csv(RESULTS + "/dim_"+str(dim_true)+"/result_" + str(n_nodes) +
+            result.to_csv(RESULTS + "/dim_" + str(dim_true) + "/result_" + str(n_nodes) +
                           "_" + str(n_graph) + "_MinGE.csv", index=False)
             print("estimated dimensionality:",
                   n_dim_list[np.argmin(entropy_list)])
 
 
-def calc_GE_mammal(n_dim, weight_entropy):
-    adj_mat = np.load('results/mammals/adj_mat.npy', allow_pickle='TRUE')
+def calc_GE_lexical(n_dim, weight_entropy, dataset_name):
+    data = np.load("dataset/wn_dataset/" + dataset_name +
+                   "_data.npy", allow_pickle=True).item()
+    adj_mat = data["adj_mat"]
 
     N = len(adj_mat)
     # Structure Entropy
@@ -178,45 +180,58 @@ def calc_GE_mammal(n_dim, weight_entropy):
     return H_f + weight_entropy * H_s
 
 
-def mammal_dataset(n_dim_list):
+def lexical_dataset(n_dim_list, dataset_name):
+    print(dataset_name)
     weight_entropy = 1.0
 
     result = pd.DataFrame()
     entropy_list = []
     for n_dim in n_dim_list:
         entropy_list.append(
-            calc_GE_mammal(n_dim, weight_entropy))
+            calc_GE_lexical(n_dim, weight_entropy, dataset_name))
     entropy_list = np.array(entropy_list)
     result["model_n_dims"] = n_dim_list
     result["MinGE"] = entropy_list
-    result.to_csv(RESULTS + "/mammals/result_MinGE.csv", index=False)
+    result.to_csv(RESULTS + "/" + dataset_name +
+                  "/result_MinGE.csv", index=False)
     print("estimated dimensionality:",
           n_dim_list[np.argmin(entropy_list)])
 
 if __name__ == "__main__":
     weight_entropy = 1.0
 
-    # artificial dataset
-    n_dim_true_list = [4, 8, 16]
+    # # artificial dataset
+    # n_dim_true_list = [4, 8, 16]
 
     # for n_dim_true in n_dim_true_list:
     #     artificial_dataset(n_dim_true)
 
-    # link prediction
-    n_dim_list = [2, 4, 8, 16, 32, 64]
+    # # link prediction
+    # n_dim_list = [2, 4, 8, 16, 32, 64]
 
-    dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
+    # dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
 
-    for dataset_name in dataset_name_list:
-        result = pd.DataFrame()
-        entropy_list = calc_GE_realworld(
-            dataset_name, n_dim_list, weight_entropy)
+    # for dataset_name in dataset_name_list:
+    #     result = pd.DataFrame()
+    #     entropy_list = calc_GE_realworld(
+    #         dataset_name, n_dim_list, weight_entropy)
 
-        result["model_n_dims"] = n_dim_list
-        result["MinGE"] = entropy_list
+    #     result["model_n_dims"] = n_dim_list
+    #     result["MinGE"] = entropy_list
 
-        result.to_csv(RESULTS + "/" + dataset_name +
-                      "/result_MinGE.csv", index=False)
+    #     result.to_csv(RESULTS + "/" + dataset_name +
+    #                   "/result_MinGE.csv", index=False)
 
     # lexical dataset
-    mammal_dataset(n_dim_list)
+    n_dim_list = [2, 4, 8, 16, 32, 64]
+    dataset_name_list = [
+        "animal",
+        "group",
+        "mammal",
+        "solid",
+        "tree",
+        "verb",
+        "worker"
+    ]
+    for dataset_name in dataset_name_list:
+        lexical_dataset(n_dim_list, dataset_name)

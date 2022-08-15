@@ -448,6 +448,63 @@ class Lorentz(nn.Module):
         return 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5 * (np.log(self.n_nodes) - np.log(2 * np.pi)) + np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
 
 
+# class PseudoUniform(Lorentz):
+#     def __init__(
+#         self,
+#         n_nodes,
+#         n_dim,  # 次元より1つ多くデータを取る必要があることに注意
+#         R,
+#         beta,
+#         sigma,
+#         sigma_min,
+#         sigma_max,
+#         # beta_min,
+#         # beta_max,
+#         init_range=0.01,
+#         sparse=True,
+#         device="cpu",
+#         calc_latent=True
+#     ):
+#         super().__init__()
+#         self.n_nodes = n_nodes
+#         self.n_dim = n_dim
+#         self.beta = nn.Parameter(torch.tensor(beta))
+#         # self.beta = beta
+#         self.sigma = sigma
+#         self.sigma_min = sigma_min
+#         self.sigma_max = sigma_max
+#         # self.beta_min = beta_min
+#         # self.beta_max = beta_max
+#         # self.sigma = nn.Parameter(torch.tensor(sigma))
+#         self.R = R
+#         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
+#         self.device = device
+#         self.calc_latent = calc_latent
+
+#         self.I_D = torch.zeros(self.n_dim - 1)  # 0番目は空
+#         for j in range(1, self.n_dim - 1):
+#             numerator = lambda theta: np.sin(theta)**(self.n_dim - 1 - j)
+#             self.I_D[j] = integrate.quad(numerator, 0, np.pi)[0]
+
+#         print("分母:", self.I_D)
+
+#         self.avg_codelength = torch.zeros(self.n_dim - 1)
+
+#         for j in range(1, self.n_dim - 1):
+#             numerator = lambda theta: -(np.sin(theta)**(self.n_dim - 1 - j) / self.I_D[j].numpy()) * (
+#                 (self.n_dim - 1 - j) * np.log(np.sin(theta)) - np.log(self.I_D[j].numpy()))
+#             self.avg_codelength[j] = integrate.quad(numerator, 0, np.pi)[0]
+
+#         print("平均符号長:", self.avg_codelength)
+
+#         # nn.init.uniform_(self.table.weight, -init_range, init_range)
+#         nn.init.normal(self.table.weight, 0, init_range)
+
+#         # 0次元目をセット
+#         with torch.no_grad():
+#             set_dim0(self.table.weight, self.R)
+
+
 def CV_HGG(
     adj_mat,
     params_dataset,
@@ -912,33 +969,62 @@ def DNML_HGG(
 
     # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
     # 平均次数とかから逆算できる気がする。
-    model = Lorentz(
+    model_latent = Lorentz(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
         sigma=1.0,
         beta=1.0,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
         init_range=0.001,
         sparse=sparse,
-        device=device
+        device=device,
+        calc_latent=True
+    )
+    model_naive = Lorentz(
+        n_nodes=params_dataset['n_nodes'],
+        n_dim=model_n_dim,  # モデルの次元
+        R=params_dataset['R'],
+        sigma=1.0,
+        beta=1.0,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        init_range=0.001,
+        sparse=sparse,
+        device=device,
+        calc_latent=False
     )
     # 最適化関数。
-    rsgd = RSGD(
-        model.parameters(),
+    rsgd_latent = RSGD(
+        model_latent.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
         lr_sigma=lr_sigma,
         R=params_dataset['R'],
-        sigma_max=sigma_max,
-        sigma_min=sigma_min,
+        # sigma_max=sigma_max,
+        # sigma_min=sigma_min,
+        beta_max=beta_max,
+        beta_min=beta_min,
+        device=device
+    )
+    rsgd_naive = RSGD(
+        model_naive.parameters(),
+        lr_embeddings=lr_embeddings,
+        lr_beta=lr_beta,
+        lr_sigma=lr_sigma,
+        R=params_dataset['R'],
+        # sigma_max=sigma_max,
+        # sigma_min=sigma_min,
         beta_max=beta_max,
         beta_min=beta_min,
         device=device
     )
 
-    model.to(device)
+    model_latent.to(device)
+    model_naive.to(device)
 
-    loss_history = []
+    # loss_history = []
 
     start = time.time()
 
@@ -946,9 +1032,11 @@ def DNML_HGG(
         # if epoch != 0 and epoch % 30 == 0:  # 10 epochごとに学習率を減少
             # rsgd.param_groups[0]["lr_embeddings"] /= 5
         if epoch == 10:
-            rsgd.param_groups[0]["lr_embeddings"] = lr_epoch_10
+            rsgd_latent.param_groups[0]["lr_embeddings"] = lr_epoch_10
+            rsgd_naive.param_groups[0]["lr_embeddings"] = lr_epoch_10
 
-        losses = []
+        losses_latent = []
+        losses_naive = []
         for pairs, labels in dataloader:
             pairs = pairs.reshape((-1, 2))
             labels = labels.reshape(-1)
@@ -956,15 +1044,22 @@ def DNML_HGG(
             pairs = pairs.to(device)
             labels = labels.to(device)
 
-            rsgd.zero_grad()
-            loss = model(pairs, labels).mean()
-            loss.backward()
-            rsgd.step()
-            losses.append(loss)
+            rsgd_latent.zero_grad()
+            loss_latent = model_latent(pairs, labels).mean()
+            loss_latent.backward()
+            rsgd_latent.step()
+            losses_latent.append(loss_latent)
 
-        loss_history.append(torch.Tensor(losses).mean().item())
-        print("epoch:", epoch, ", loss:",
-              torch.Tensor(losses).mean().item())
+            rsgd_naive.zero_grad()
+            loss_naive = model_naive(pairs, labels).mean()
+            loss_naive.backward()
+            rsgd_naive.step()
+            losses_naive.append(loss_naive)
+
+        # loss_history.append(torch.Tensor(losses).mean().item())
+        print("epoch:", epoch, ", loss_latent:",
+              torch.Tensor(losses_latent).mean().item())
+        print("loss_naive:", torch.Tensor(losses_naive).mean().item())
 
     elapsed_time = time.time() - start
     print("elapsed_time:{0}".format(elapsed_time) + "[sec]")
@@ -989,32 +1084,62 @@ def DNML_HGG(
     # -2*log(p)の計算
     basescore_y_and_z = 0
     basescore_y_given_z = 0
+    basescore_y_given_z_naive = 0
     for pairs, labels in dataloader_all:
         pairs = pairs.to(device)
         labels = labels.to(device)
 
-        basescore_y_and_z += model(pairs, labels).sum().item()
-        basescore_y_given_z += model.lik_y_given_z(pairs, labels).sum().item()
+        basescore_y_and_z += model_latent(pairs, labels).sum().item()
+        basescore_y_given_z += model_latent.lik_y_given_z(
+            pairs, labels).sum().item()
+        basescore_y_given_z_naive += model_naive.lik_y_given_z(
+            pairs, labels).sum().item()
 
-    basescore_z = model.z()
+    basescore_z = model_latent.z()
 
-    AIC_naive = basescore_y_given_z + \
+    AIC_naive = basescore_y_given_z_naive + \
         (params_dataset['n_nodes'] * model_n_dim + 1)
-    BIC_naive = basescore_y_given_z + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
+    BIC_naive = basescore_y_given_z_naive + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
         np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
 
-    pc_first, pc_second = model.get_PC(
+    AIC_naive_from_latent = basescore_y_given_z + \
+        (params_dataset['n_nodes'] * model_n_dim + 1)
+    BIC_naive_from_latent = basescore_y_given_z + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
+        np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
+
+    pc_first, pc_second = model_latent.get_PC(
         sigma_max, sigma_min, beta_max, beta_min)
     DNML_codelength = basescore_y_and_z + pc_first + pc_second
 
     print("p(y, z; theta):", basescore_y_and_z)
     print("p(y|z; theta):", basescore_y_given_z)
     print("p(z; theta):", basescore_z)
+    print("p(y; z, theta):", basescore_y_given_z_naive)
     print("DNML:", DNML_codelength)
-    print("AIC naive:", AIC_naive)
+    print("AIC_naive:", AIC_naive)
     print("BIC_naive:", BIC_naive)
+    print("AIC_naive_from_latent:", AIC_naive_from_latent)
+    print("BIC_naive_from_latent:", BIC_naive_from_latent)
+    # print("AUC_latent:", AUC_latent)
+    # print("AUC_naive:", AUC_naive)
 
-    return basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive, model.get_lorentz_table()
+    ret = {
+        "basescore_y_and_z": basescore_y_and_z,
+        "basescore_y_given_z": basescore_y_given_z,
+        "basescore_z": basescore_z,
+        "basescore_y_given_z_naive": basescore_y_given_z_naive,
+        "DNML_codelength": DNML_codelength,
+        "pc_first": pc_first,
+        "pc_second": pc_second,
+        "AIC_naive": AIC_naive,
+        "BIC_naive": BIC_naive,
+        "AIC_naive_from_latent": AIC_naive_from_latent,
+        "BIC_naive_from_latent": BIC_naive_from_latent,
+        "model_latent": model_latent,
+        "model_naive": model_naive
+    }
+
+    return ret
 
 
 if __name__ == '__main__':

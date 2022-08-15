@@ -1,0 +1,7 @@
+screen -dm bash -c 'conda activate embed; cd poincare_embeddings; python experiment_wn.py animal 0'
+screen -dm bash -c 'conda activate embed; cd poincare_embeddings; python experiment_wn.py mammal 1'
+screen -dm bash -c 'conda activate embed; cd poincare_embeddings; python experiment_wn.py group 3'
+screen -dm bash -c 'conda activate embed; cd poincare_embeddings; python experiment_wn.py solid 0'
+screen -dm bash -c 'conda activate embed; cd poincare_embeddings; python experiment_wn.py tree 1'
+screen -dm bash -c 'conda activate embed; cd poincare_embeddings; python experiment_wn.py verb 2'
+screen -dm bash -c 'conda activate embed; cd poincare_embeddings; python experiment_wn.py worker 3'
