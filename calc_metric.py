@@ -1,22 +1,25 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-from scipy import integrate
+from scipy import integrate, stats
 # from embed import create_dataset
 from copy import deepcopy
 import pandas as pd
 from sklearn.metrics import label_ranking_average_precision_score, average_precision_score
 import matplotlib.pyplot as plt
 import matplotlib
-from experiment_wn import result_wn
+from experiment_wn import is_a_score
+
 
 RESULTS = "results"
 
 
 def artificial():
 
-    D_true_list = [4, 8, 16]
-    n_nodes_list = [400, 800, 1600, 3200, 6400]
+    # D_true_list = [4, 8, 16]
+    D_true_list = [16]
+
+    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
     n_graphs = 12
     T_gap = 2
 
@@ -54,7 +57,8 @@ def artificial():
                                      "/result_" + str(n_nodes) + "_" + str(n_graph) + ".csv")
                 result = result.fillna(9999999999999)
                 result_MinGE = pd.read_csv(
-                    RESULTS + "/dim_" + str(D_true) + "/result_" + str(n_nodes) + "_" + str(n_graph) + "_MinGE.csv")
+                    RESULTS + "/dim_" + str(D_true) + "/result_" + str(n_nodes) +
+                    "_" + str(n_graph) + "_MinGE.csv")
 
                 # if D_true<=16:
                 #     result = result.drop(result.index[[5]])
@@ -131,7 +135,7 @@ def artificial():
                 ax.plot(result["model_n_dims"], result["BIC_naive"],
                         label="BIC_naive", color="green")
                 ax.plot(result["model_n_dims"], result[
-                        "MinGE"], label="MinGE", color="orange")
+                    "MinGE"], label="MinGE", color="orange")
                 plt.xscale('log')
 
                 plt.xticks(result["model_n_dims"], fontsize=20)
@@ -190,9 +194,9 @@ def artificial():
 
 def plot_figure():
 
-    result = pd.read_csv(RESULTS + "/Dim8_10.0/result_8_6400_1.csv")
+    result = pd.read_csv(RESULTS + "/dim_16/result_6400_3.csv")
     result = result.fillna(9999999999999)
-    result = result.drop(result.index[[5]])
+    # result = result.drop(result.index[[5]])
     D_DNML = result["model_n_dims"].values[
         np.argmin(result["DNML_codelength"].values)]
 
@@ -261,7 +265,7 @@ def calc_new_metrics(result):
     criterion_MinGE_list = []
 
     DIV = 1000
-    eps_range = 0.015
+    eps_range = 0.02
 
     # AUC latentの方
     AUC_max = max(AUC_latent)
@@ -357,6 +361,33 @@ def realworld():
         print(result["AUC_latent"])
         print(result["AUC_naive"])
 
+        # 各criterionの値
+        plt.clf()
+
+        fig = plt.figure(figsize=(8, 5))
+        ax = fig.add_subplot(111)
+
+        ax.plot(result["model_n_dims"], result["AUC_latent"],
+                label="AUC of -log p(y, z)", color="red")
+        ax.plot(result["model_n_dims"], result["AUC_naive"],
+                label="AUC of -log p(y|z)", color="blue")
+        plt.xscale('log')
+        plt.ylim(0.4, 0.9)
+        plt.xticks(result["model_n_dims"], fontsize=20)
+        plt.yticks(fontsize=20)
+        ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+        plt.legend(bbox_to_anchor=(1, 0), loc='lower right',
+                   borderaxespad=0, fontsize=15)
+        ax.set_xlabel("Dimensionality", fontsize=20)
+        ax.set_ylabel("AUC", fontsize=20)
+        plt.tight_layout()
+
+        plt.savefig(RESULTS + "/" + dataset_name +
+                    "/result_AUC_" + dataset_name + ".png")
+
+        # 各criterionの値
+        plt.clf()
+
         fig = plt.figure(figsize=(8, 5))
         ax = fig.add_subplot(111)
 
@@ -391,13 +422,147 @@ def realworld():
                     "/result_" + dataset_name + ".png")
 
 
+def result_wn(model_n_dims, dataset_name):
+    print(dataset_name)
+    is_a_score_naive_list = []
+    is_a_score_latent_list = []
+
+    data = np.load("dataset/wn_dataset/" + dataset_name +
+                   "_data.npy", allow_pickle=True).item()
+    is_a = data["is_a"]
+
+    for model_n_dim in model_n_dims:
+        lorentz_table_naive = np.load(
+            RESULTS + "/" + dataset_name + '/embedding_' + str(model_n_dim) + '_naive.npy')
+        lorentz_table_latent = np.load(
+            RESULTS + "/" + dataset_name + '/embedding_' + str(model_n_dim) + '_latent.npy')
+
+        # is_a = np.load('results/' + dataset_name + '/.npy')
+        is_a_score_naive_list.append(is_a_score(
+            is_a, model_n_dim, lorentz_table_naive, 100))
+        is_a_score_latent_list.append(is_a_score(
+            is_a, model_n_dim, lorentz_table_latent, 100))
+
+    is_a_score_naive_list = np.array(is_a_score_naive_list)
+    is_a_score_latent_list = np.array(is_a_score_latent_list)
+
+    result = pd.read_csv(RESULTS + "/" + dataset_name + "/result.csv")
+
+    result_MinGE = pd.read_csv(
+        RESULTS + "/" + dataset_name + "/result_MinGE.csv")
+
+    result = pd.merge(result, result_MinGE, on="model_n_dims", how="left")
+
+    # result = result.iloc[1:, :]
+
+    D_DNML = result["model_n_dims"].values[
+        np.argmin(result["DNML_codelength"].values)]
+    D_AIC_naive = result["model_n_dims"].values[
+        np.argmin(result["AIC_naive"].values)]
+    D_BIC_naive = result["model_n_dims"].values[
+        np.argmin(result["BIC_naive"].values)]
+    D_MinGE = result["model_n_dims"].values[
+        np.argmin(result["MinGE"].values)]
+
+    best_D_latent = result["model_n_dims"].values[
+        np.argmax(is_a_score_latent_list)]
+    best_D_naive = result["model_n_dims"].values[
+        np.argmax(is_a_score_naive_list)]
+
+    print("best latent:", best_D_latent)
+    print("best naive:", best_D_naive)
+    print("DNML:", D_DNML)
+    print("AIC_naive:", D_AIC_naive)
+    print("BIC_naive:", D_BIC_naive)
+    print("MinGE:", D_MinGE)
+
+    T_gap = 2
+    ret = {
+        "bene_DNML": max(0, 1 - abs(np.log2(D_DNML) - np.log2(best_D_latent)) / T_gap),
+        "bene_AIC_naive": max(0, 1 - abs(np.log2(D_AIC_naive) - np.log2(best_D_naive)) / T_gap),
+        "bene_BIC_naive": max(0, 1 - abs(np.log2(D_BIC_naive) - np.log2(best_D_naive)) / T_gap),
+        "bene_MinGE": max(0, 1 - abs(np.log2(D_MinGE) - np.log2(best_D_naive)) / T_gap)
+    }
+
+    cor_DNML, _ = stats.spearmanr(
+        is_a_score_latent_list, -result["DNML_codelength"].values)
+    cor_AIC, _ = stats.spearmanr(
+        is_a_score_naive_list, -result["AIC_naive"].values)
+    cor_BIC, _ = stats.spearmanr(
+        is_a_score_naive_list, -result["BIC_naive"].values)
+    cor_MinGE, _ = stats.spearmanr(
+        is_a_score_latent_list, -result["MinGE"].values)
+
+    print("cor_DNML:", cor_DNML)
+    print("cor_AIC:", cor_AIC)
+    print("cor_BIC:", cor_BIC)
+    print("cor_MinGE:", cor_MinGE)
+
+    plt.clf()
+    fig = plt.figure(figsize=(8, 5))
+    ax = fig.add_subplot(111)
+
+    def normalize(x):
+        return (x - np.min(x.values)) / (np.max(x.values) - np.min(x.values))
+
+    result["DNML_codelength"] = normalize(result["DNML_codelength"])
+    result["AIC_naive"] = normalize(result["AIC_naive"])
+    result["BIC_naive"] = normalize(result["BIC_naive"])
+    result["MinGE"] = normalize(result["MinGE"])
+
+    ax.plot(result["model_n_dims"], result[
+            "DNML_codelength"], label="DNML-HGG", color="red")
+    ax.plot(result["model_n_dims"], result["AIC_naive"],
+            label="AIC_naive", color="blue")
+    ax.plot(result["model_n_dims"], result["BIC_naive"],
+            label="BIC_naive", color="green")
+    ax.plot(result["model_n_dims"], result[
+            "MinGE"], label="MinGE", color="orange")
+    plt.xscale('log')
+    plt.xticks(result["model_n_dims"], fontsize=20)
+    plt.yticks(fontsize=20)
+    ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    plt.legend(bbox_to_anchor=(1, 1), loc='upper right',
+               borderaxespad=0, fontsize=15)
+    ax.set_xlabel("Dimensionality", fontsize=20)
+    ax.set_ylabel("Normalized Criterion", fontsize=20)
+    plt.tight_layout()
+
+    plt.savefig(RESULTS + "/" + dataset_name +
+                "/result_" + dataset_name + ".png")
+
+    plt.clf()
+    fig = plt.figure(figsize=(8, 5))
+    ax = fig.add_subplot(111)
+
+    ax.plot(result["model_n_dims"], is_a_score_latent_list,
+            label="Is-a scores of -log p(y, z)", color="red")
+    ax.plot(result["model_n_dims"], is_a_score_naive_list,
+            label="Is-a scores of -log p(y|z)", color="blue")
+    plt.xscale('log')
+    plt.xticks(result["model_n_dims"], fontsize=20)
+    plt.yticks(fontsize=20)
+    ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    plt.legend(bbox_to_anchor=(1, 1), loc='upper right',
+               borderaxespad=0, fontsize=15)
+    ax.set_xlabel("Dimensionality", fontsize=20)
+    ax.set_ylabel("is a score", fontsize=20)
+    plt.tight_layout()
+
+    plt.savefig(RESULTS + "/" + dataset_name +
+                "/result_is_a_score_" + dataset_name + ".png")
+
+    return ret
+
+
 if __name__ == "__main__":
 
-    # plot_figure()
-    # print("Results of Artificial Datasets")
-    # artificial()
-    # print("Results of Scientific Collaboration Networks")
-    # realworld()
+    print("Plot Example Figure")
+    plot_figure()
+    print("Results of Artificial Datasets")
+    artificial()
+    print("Results of Scientific Collaboration Networks")
+    realworld()
     print("Results of WN dataset")
     dataset_name_list = [
         "animal",
@@ -405,7 +570,7 @@ if __name__ == "__main__":
         "mammal",
         "solid",
         "tree",
-        # "verb",
+        "verb",
         "worker"
     ]
     bene_DNML = []
