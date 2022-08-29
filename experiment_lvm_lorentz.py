@@ -192,17 +192,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
 
-    n_nodes_list = [400, 800, 1600, 3200, 6400]
+    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+
     model_n_dims = [2, 4, 8, 16, 32, 64]
 
     n_partitions = 12
     n_devices = 4
     n_graphs = 12
 
-    # if int(args.n_dim) == 8:
-    #     model_n_dims = [2, 4, 8, 16]
-    # elif int(args.n_dim) == 16:
-    #     model_n_dims = [2, 4, 8, 16, 32]
     os.makedirs(RESULTS + "/dim_" + args.n_dim + "/", exist_ok=True)
 
     for n_nodes in n_nodes_list:
