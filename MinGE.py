@@ -113,7 +113,9 @@ def calc_GE(dim_true, n_dim, n_nodes, n_graph, weight_entropy):
 def artificial_dataset(dim_true):
     weight_entropy = 1.0
     # dim_true = 16
-    n_nodes_list = [400, 800, 1600, 3200, 6400]
+    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    n_nodes_list = [12800]
+
     n_graphs = 12
 
     if dim_true == 4:
@@ -200,27 +202,25 @@ def lexical_dataset(n_dim_list, dataset_name):
 if __name__ == "__main__":
     weight_entropy = 1.0
 
-    # # artificial dataset
-    # n_dim_true_list = [4, 8, 16]
+    # artificial dataset
+    n_dim_true_list = [4, 8, 16]
+    for n_dim_true in n_dim_true_list:
+        artificial_dataset(n_dim_true)
 
-    # for n_dim_true in n_dim_true_list:
-    #     artificial_dataset(n_dim_true)
+    # link prediction
+    n_dim_list = [2, 4, 8, 16, 32, 64]
+    dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
 
-    # # link prediction
-    # n_dim_list = [2, 4, 8, 16, 32, 64]
+    for dataset_name in dataset_name_list:
+        result = pd.DataFrame()
+        entropy_list = calc_GE_realworld(
+            dataset_name, n_dim_list, weight_entropy)
 
-    # dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
+        result["model_n_dims"] = n_dim_list
+        result["MinGE"] = entropy_list
 
-    # for dataset_name in dataset_name_list:
-    #     result = pd.DataFrame()
-    #     entropy_list = calc_GE_realworld(
-    #         dataset_name, n_dim_list, weight_entropy)
-
-    #     result["model_n_dims"] = n_dim_list
-    #     result["MinGE"] = entropy_list
-
-    #     result.to_csv(RESULTS + "/" + dataset_name +
-    #                   "/result_MinGE.csv", index=False)
+        result.to_csv(RESULTS + "/" + dataset_name +
+                      "/result_MinGE.csv", index=False)
 
     # lexical dataset
     n_dim_list = [2, 4, 8, 16, 32, 64]
