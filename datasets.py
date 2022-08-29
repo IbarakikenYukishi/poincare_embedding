@@ -269,65 +269,10 @@ def beta_hat__(n_nodes, n_dim, beta, sigma, beta_min, beta_max):
     print(lr.coef_)
 
 if __name__ == '__main__':
-
-    # calc_likelihood(n_nodes=1000, n_dim=16, sigma=1,
-    #                 R=10, sigma_min=0.1, sigma_max=10)
-
-    # beta_hat__(n_nodes=1000, n_dim=4, beta=1,
-    #          sigma=0.1, beta_min=0.1, beta_max=10)
-
-    # beta_hat_test(n_nodes=1000, n_dim=4, beta=1.5,
-    #               sigma=1, beta_min=0.1, beta_max=10)
-
-    # n_dim_true_list = [8, 16]
-    # n_nodes_list = [400, 800, 1600, 3200, 6400]
-    # n_graphs = 10
-
-    # for n_dim_true in n_dim_true_list:
-    #     for n_nodes in n_nodes_list:
-    #         for n_graph in range(n_graphs):
-
-    #             params_adj_mat = {
-    #                 'n_nodes': n_nodes,
-    #                 'n_dim': n_dim_true,
-    #                 'R': np.log(n_nodes) - 0.5,
-    #                 'sigma': 0.1,
-    #                 'beta': 0.3
-    #             }
-    #             adj_mat, x_e = hyperbolic_geometric_graph(
-    #                 n_nodes=params_adj_mat["n_nodes"],
-    #                 n_dim=params_adj_mat["n_dim"],
-    #                 R=params_adj_mat["R"],
-    #                 sigma=params_adj_mat["sigma"],
-    #                 beta=params_adj_mat["beta"]
-    #             )
-
-    #             positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
-    #                 adj_mat, params_adj_mat)
-
-    #             graph_dict = {
-    #                 "params_adj_mat": params_adj_mat,
-    #                 "adj_mat": adj_mat,
-    #                 "positive_samples": positive_samples,
-    #                 "negative_samples": negative_samples,
-    #                 "train_graph": train_graph,
-    #                 "lik_data": lik_data,
-    #                 "x_e": x_e
-    #             }
-
-    #             # 平均次数が少なくなるように手で調整する用
-    #             print('average degree:', np.sum(adj_mat) / len(adj_mat))
-
-    #             os.makedirs('dataset/dim_' +
-    #                         str(params_adj_mat['n_dim']), exist_ok=True)
-    #             np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
-    # params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy', graph_dict)
-
     n_dim_true_list = [4, 8, 16]
-    n_nodes_list = [400, 800, 1600, 3200, 6400]
+    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
     sigma_list = [0.5, 1.0, 2.0]
     beta_list = [0.6, 0.8, 1.0, 1.2]
-    # n_graphs = 10
 
     for n_dim_true in n_dim_true_list:
         for n_nodes in n_nodes_list:
