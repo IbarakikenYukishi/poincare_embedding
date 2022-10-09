@@ -119,6 +119,15 @@ def exp_map(
     return result
 
 
+def log_map(
+    z,
+    mu
+):
+    alpha = -lorentz_scalar_product(z, mu).reshape((-1, 1))
+    u = (arcosh(alpha) / torch.sqrt(alpha**2 - 1)) * (z - alpha * mu)
+    return u
+
+
 def set_dim0(x, R):
     x[:, 1:] = torch.renorm(x[:, 1:], p=2, dim=0,
                             maxnorm=np.sinh(R))  # 半径Rの範囲に収めたい
@@ -331,6 +340,23 @@ if __name__ == "__main__":
     )
 
     print(exp_map(x, v))
+
+    # log map
+    print("log map")
+    x = torch.Tensor([
+        [1, 0, 0, 0],
+        [1, 0, 0, 0],
+        [1, 0, 0, 0]
+    ]
+    )
+    v = torch.Tensor([
+        [0, np.sinh(1), 0, 0],
+        [0, 0, np.sinh(1), 0],
+        [0, 0, 0, np.sinh(1)]
+    ]
+    )
+
+    print(log_map(exp_map(x, v), x))
 
     # set_dim0
     print("set_dim0")

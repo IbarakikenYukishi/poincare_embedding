@@ -24,7 +24,7 @@ from torch import Tensor
 from scipy import integrate
 from sklearn import metrics
 import math
-from scipy import stats
+from scipy import stats, special
 
 np.random.seed(0)
 
@@ -41,6 +41,7 @@ from utils.utils import (
     lorentz_scalar_product,
     tangent_norm,
     exp_map,
+    log_map,
     set_dim0,
     calc_likelihood_list,
     calc_log_C_D,
@@ -55,6 +56,11 @@ from utils.utils_dataset import (
     create_dataset_for_basescore,
     create_dataset
 )
+
+
+@fts.lru_cache(maxsize=None)
+def multigamma_ln(a, d):
+    return special.multigammaln(a, d)
 
 
 class RSGD(optim.Optimizer):
@@ -812,6 +818,7 @@ class WrappedNormal(Lorentz):
         n_dim,  # 次元より1つ多くデータを取る必要があることに注意
         R,
         Sigma,
+        epsilon,
         init_range=0.01,
         sparse=True,
         device="cpu",
@@ -828,6 +835,8 @@ class WrappedNormal(Lorentz):
             calc_latent=calc_latent
         )
         self.Sigma = Sigma
+        self.Sigma = self.Sigma.to(self.device)
+        self.epsilon = epsilon
 
         nn.init.normal(self.table.weight, 0, init_range)
 
@@ -835,45 +844,28 @@ class WrappedNormal(Lorentz):
         with torch.no_grad():
             set_dim0(self.table.weight, self.R)
 
-    def sigma_hat(
+    def Sigma_hat(
         self
     ):
-        x = self.table.weight.data.cpu()
-        r = arcosh(x[:, 0].reshape((-1, 1))).numpy()
-        r = np.where(r <= 1e-6, 1e-6, r)[:, 0]
+        z = self.table.weight.data
+        mu = torch.zeros((1, self.n_dim + 1)).to(self.device)
+        mu[0] = 1
 
-        sigma_list, ret, sigma_hat = calc_likelihood_list(
-            r, n_dim=self.n_dim, R=self.R, sigma_min=self.sigma_min, sigma_max=self.sigma_max, DIV=1000)
+        z_prime = log_map(x, mu)
+        z_prime_ = z_prime[:, 1:]
 
-        print(r)
-
-        self.sigma = sigma_hat
-        print("sigma:", self.sigma)
-        print("beta:", self.beta)
-
-    # def beta_hat(
-    #     self,
-    #     train_graph,
-    #     n_samples
-    # ):
-    #     x = self.table.weight.data
-    #     # r = arcosh(x[:, 0].reshape((-1, 1))).numpy()
-    #     # r = np.where(r <= 1e-6, 1e-6, r)[:, 0]
-
-    #     # n_samples = int(n_nodes * 0.1)
-
-    #     lr = calc_beta_hat(z=x, train_graph=train_graph, n_samples=n_samples,
-    # R=self.R, beta_min=self.beta_min, beta_max=self.beta_max)
-
-    #     self.beta = lr
-
-    #     print("beta:", self.beta)
+        self.Sigma = z_prime_.T.dot(z_prime_) / self.n_dim
+        print(self.Sigma)
 
     def latent_lik(
         self,
         x,
         polar=False
     ):
+
+        lik += (self.n_dim / 2) * torch.log(2 * np.pi) + \
+            0.5 * torch.det(self.Sigma)
+
         # 半径方向
         r = arcosh(torch.sqrt(
             1 + (x[:, 1:]**2).sum(dim=1, keepdim=True))).double()
@@ -927,67 +919,13 @@ class WrappedNormal(Lorentz):
         return lik
 
     def get_PC(
-        self,
-        sigma_max,
-        sigma_min,
-        beta_max,
-        beta_min,
-        sampling=True
+        self
     ):
-        if sampling == False:
-            # DNMLのPCの計算
-            x_e = self.get_poincare_table()
-        else:
-            idx = np.array(range(self.n_nodes))
-            idx = np.random.permutation(idx)[:int(self.n_nodes * 0.1)]
-            x_e = self.get_poincare_table()[idx, :]
-
-        n_nodes_sample = len(x_e)
-        print(n_nodes_sample)
-
-        norm_x_e_2 = np.sum(x_e**2, axis=1).reshape((-1, 1))
-        denominator_mat = (1 - norm_x_e_2) * (1 - norm_x_e_2.T)
-        numerator_mat = norm_x_e_2 + norm_x_e_2.T
-        numerator_mat -= 2 * x_e.dot(x_e.T)
-        # arccoshのエラー対策
-        for i in range(n_nodes_sample):
-            numerator_mat[i, i] = 0
-        dist_mat = np.arccosh(1 + 2 * numerator_mat / denominator_mat)
-
-        is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
-        dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
-        # dist_mat
-        X = self.R - dist_mat
-        for i in range(n_nodes_sample):
-            X[i, i] = 0
-
-        # I_n
-        def sqrt_I_n(
-            beta
-        ):
-            return np.sqrt(np.sum(X**2 / ((np.cosh(beta * X / 2.0) * 2)**2)) / (n_nodes_sample * (n_nodes_sample - 1)))
-
-        # I
-        def sqrt_I(
-            sigma
-        ):
-            # denominator = self.integral_sinh(self.n_dim - 1)
-            denominator = integral_sinh(
-                n=self.n_dim - 1, n_dim=self.n_dim, sigma=self.sigma, R=self.R, exp_C=self.sigma * self.R)
-
-            numerator_1 = lambda r: (r**2) * ((np.exp(self.sigma * (r - self.R)) + np.exp(-self.sigma * (r + self.R)))**2) * (
-                (np.exp(self.sigma * (r - self.R)) - np.exp(-self.sigma * (r + self.R)))**(self.n_dim - 3))
-            first_term = ((self.n_dim - 1)**2) * \
-                integrate.quad(numerator_1, 0, self.R)[0] / denominator
-
-            numerator_2 = lambda r: r * (np.exp(self.sigma * (r - self.R)) + np.exp(-self.sigma * (r + self.R))) * (
-                (np.exp(self.sigma * (r - self.R)) - np.exp(-self.sigma * (r + self.R)))**(self.n_dim - 2))
-            second_term = (
-                (self.n_dim - 1) * integrate.quad(numerator_2, 0, self.R)[0] / denominator)**2
-
-            return np.sqrt(np.abs(first_term - second_term))
-
-        return 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5 * (np.log(self.n_nodes) - np.log(2 * np.pi)) + np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
+    ret = (self.n_dim - self.n_dim * self.n_nodes / 2) * np.log(2) + (self.n_dim * self.n_nodes / 2) * \
+        np.log(self.n_nodes) - multgamma_ln(self.n_nodes / 2, self.n_dim)
+    ret += -self.n_dim * self.n_nodes / 2 - self.n_dim * \
+        np.log(self.n_dim - 1) - (self.n_dim *
+                                  (self.n_dim + 1) / 2) * np.log(self.epsilon)
 
 
 def CV_HGG(
