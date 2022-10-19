@@ -13,9 +13,9 @@ The implementation assumes the availability of CUDA device.
 
 ## 3. How to Run
 ### Artificial Dataset
-1. Run datasets.py to generate artificial datasets.
+1. Execute `python datasets.py` to generate artificial datasets.
 
-2. Execute `python experiment_lvm.py X Y`, where X \in {4, 8, 16} is the true dimensionality (HGG-X), and Y is the CUDA device in which the program runs.
+2. Execute `python experiment_lvm_lorentz.py X Y`, where X \in {16} is the true dimensionality (HGG-X), and Y is the CUDA device in which the program runs.
 
 ### Real-world Dataset
 
@@ -25,20 +25,26 @@ The implementation assumes the availability of CUDA device.
 - GrQc: https://snap.stanford.edu/data/ca-GrQc.html
 - HepPh: https://snap.stanford.edu/data/ca-HepPh.html
 
-2. Execute `python experiment_realworld.py X Y Z`, where X \in {0, 1, 2, 3} is the id of the dataset (i.e, 0: AstroPh, 1:HepPh, 2: CondMat, and 3: GrQc), Y \in {2, 4, 8, 16, 32, 64} is the model dimensionality, and Z is the CUDA device in which the program runs. The combinations of X and Y are taken to be {0, 1, 2, 3}×{2, 4, 8, 16, 32, 64}.
+2. Execute `python transitive_closure.py`
 
-3. run `MinGE.py`
+3. Execute `python experiment_realworld_lorentz.py X Y Z`, where X \in {0, 1, 2, 3} is the id of the dataset (i.e, 0: AstroPh, 1:HepPh, 2: CondMat, and 3: GrQc), Y \in {2, 4, 8, 16, 32, 64} is the model dimensionality, and Z is the CUDA device in which the program runs. The combinations of X and Y are taken to be {0, 1, 2, 3}×{2, 4, 8, 16, 32, 64}.
 
-### Metrics.py
+4. Execute `python experiment_wn.py X Y`, where X \in {animal, mammal, group, solid, tree, worker} is the name of the dataset, and Y is the CUDA device in which the program runs.
 
-1. Run `calc_metric.py`. For artificial dataset, selected dimensionality and benefit are shown in command line. For real-world datasets , selected dimensionality and AUC are shown in command line. At the same time, the figures of each criterion are generated in `results`.
+5. run `MinGE.py`
+
+### Results
+
+1. Run `calc_metric.py`. For artificial dataset, selected dimensionality and benefit are shown in command line. For scientific collaboration networks, selected dimensionalities and AUC are shown in command line. For WN-mammal, the selected dimensionalities and is-a scores are shown in command line. At the same time, the figures of each criterion are generated in `results`.
 
 ## 4. Author & Mail address
-Currently anonymous.
+Ryo Yuki
+- jie-cheng-ling@g.ecc.u-tokyo.ac.jp
 
 ## 5. Requirements & License
 ### Requirements
 - torch==1.8.1
+- nltk==3.6.7
 - numpy
 - scipy
 - pandas
