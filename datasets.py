@@ -269,7 +269,7 @@ def beta_hat__(n_nodes, n_dim, beta, sigma, beta_min, beta_max):
     print(lr.coef_)
 
 if __name__ == '__main__':
-    n_dim_true_list = [4, 8, 16]
+    n_dim_true_list = [16]
     n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
     sigma_list = [0.5, 1.0, 2.0]
     beta_list = [0.6, 0.8, 1.0, 1.2]
