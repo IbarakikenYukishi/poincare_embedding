@@ -203,7 +203,7 @@ if __name__ == "__main__":
     weight_entropy = 1.0
 
     # artificial dataset
-    n_dim_true_list = [4, 8, 16]
+    n_dim_true_list = [16]
     for n_dim_true in n_dim_true_list:
         artificial_dataset(n_dim_true)
 

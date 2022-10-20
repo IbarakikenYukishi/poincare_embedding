@@ -315,10 +315,10 @@ def calc_new_metrics(result):
     # print(criterion_BIC_list)
     # print(criterion_MinGE_list)
 
-    print("DNML:", np.average(criterion_DNML_list))
-    print("AIC:", np.average(criterion_AIC_list))
-    print("BIC:", np.average(criterion_BIC_list))
-    print("MinGE:", np.average(criterion_MinGE_list))
+    # print("DNML:", np.average(criterion_DNML_list))
+    # print("AIC:", np.average(criterion_AIC_list))
+    # print("BIC:", np.average(criterion_BIC_list))
+    # print("MinGE:", np.average(criterion_MinGE_list))
 
 
 def realworld():

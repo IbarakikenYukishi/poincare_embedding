@@ -58,9 +58,9 @@ from utils.utils_dataset import (
 )
 
 
-@fts.lru_cache(maxsize=None)
-def multigamma_ln(a, d):
-    return special.multigammaln(a, d)
+# @fts.lru_cache(maxsize=None)
+# def multigamma_ln(a, d):
+#     return special.multigammaln(a, d)
 
 
 class RSGD(optim.Optimizer):
@@ -808,124 +808,6 @@ class PseudoUniform(Lorentz):
             return np.sqrt(np.abs(first_term - second_term))
 
         return 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5 * (np.log(self.n_nodes) - np.log(2 * np.pi)) + np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
-
-
-class WrappedNormal(Lorentz):
-
-    def __init__(
-        self,
-        n_nodes,
-        n_dim,  # 次元より1つ多くデータを取る必要があることに注意
-        R,
-        Sigma,
-        epsilon,
-        init_range=0.01,
-        sparse=True,
-        device="cpu",
-        calc_latent=True
-    ):
-        super().__init__(
-            n_nodes=n_nodes,
-            n_dim=n_dim,  # 次元より1つ多くデータを取る必要があることに注意
-            R=R,
-            beta=beta,
-            init_range=init_range,
-            sparse=sparse,
-            device=device,
-            calc_latent=calc_latent
-        )
-        self.Sigma = Sigma
-        self.Sigma = self.Sigma.to(self.device)
-        self.epsilon = epsilon
-
-        nn.init.normal(self.table.weight, 0, init_range)
-
-        # 0次元目をセット
-        with torch.no_grad():
-            set_dim0(self.table.weight, self.R)
-
-    def Sigma_hat(
-        self
-    ):
-        z = self.table.weight.data
-        mu = torch.zeros((1, self.n_dim + 1)).to(self.device)
-        mu[0] = 1
-
-        z_prime = log_map(x, mu)
-        z_prime_ = z_prime[:, 1:]
-
-        self.Sigma = z_prime_.T.dot(z_prime_) / self.n_dim
-        print(self.Sigma)
-
-    def latent_lik(
-        self,
-        x,
-        polar=False
-    ):
-
-        lik += (self.n_dim / 2) * torch.log(2 * np.pi) + \
-            0.5 * torch.det(self.Sigma)
-
-        # 半径方向
-        r = arcosh(torch.sqrt(
-            1 + (x[:, 1:]**2).sum(dim=1, keepdim=True))).double()
-        r = torch.where(r <= 1e-6, 1e-6, r)[:, 0]
-
-        # rの尤度
-        lik = -(self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * self.sigma *
-                                                           r) + 0.00001) + self.sigma * r - torch.log(torch.Tensor([2]).to(self.device)))
-
-        # rの正規化項
-        log_C_D = calc_log_C_D(n_dim=self.n_dim, sigma=self.sigma, R=self.R)
-
-        lik = lik + log_C_D
-
-        if polar:
-            x_ = x[:, 1:]
-            x_ = x_**2
-            x_ = torch.cumsum(
-                x_[:, torch.arange(self.n_dim - 1, -1, -1)], dim=1)  # j番目がDからD-jの和
-            x_ = x_[:, torch.arange(self.n_dim - 1, -1, -1)]  # j番目がDからj+1の和
-            x_ = torch.max(torch.Tensor([[0.000001]]).to(self.device), x_)
-            # 角度方向
-            sin_theta = torch.zeros(
-                (x.shape[0], self.n_dim - 1)).to(self.device)
-            for j in range(1, self.n_dim - 1):
-                sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
-
-            # 角度方向の尤度
-            for j in range(1, self.n_dim - 1):
-                lik = lik - (self.n_dim - 1 - j) * torch.log(sin_theta[:, j])
-                # 正規化項を足す
-                lik = lik + torch.log(self.I_D[j])
-
-            lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
-
-        else:
-            # 角度方向の尤度
-            for j in range(1, self.n_dim - 1):
-                # 正規化項を足す
-                lik = lik + torch.log(self.I_D[j])
-
-            lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
-
-            # ヤコビアン由来の項
-            lik = lik + (self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * r) +
-                                                      0.00001) + r - torch.log(torch.Tensor([2]).to(self.device)))
-
-            lik = lik + torch.log(1 + torch.exp(-2 * r) + 0.00001) + \
-                r - torch.log(torch.Tensor([2]).to(self.device))
-
-        return lik
-
-    def get_PC(
-        self
-    ):
-    ret = (self.n_dim - self.n_dim * self.n_nodes / 2) * np.log(2) + (self.n_dim * self.n_nodes / 2) * \
-        np.log(self.n_nodes) - multgamma_ln(self.n_nodes / 2, self.n_dim)
-    ret += -self.n_dim * self.n_nodes / 2 - self.n_dim * \
-        np.log(self.n_dim - 1) - (self.n_dim *
-                                  (self.n_dim + 1) / 2) * np.log(self.epsilon)
 
 
 def CV_HGG(
