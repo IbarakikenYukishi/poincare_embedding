@@ -173,23 +173,23 @@ def artificial():
                   "±", np.std(bene_AIC_naive))
             print("BIC_naive:", np.mean(bene_BIC_naive),
                   "±", np.std(bene_BIC_naive))
-            print("AIC_naive_from_latent:", np.mean(
-                bene_AIC_naive_from_latent), "±", np.std(bene_AIC_naive_from_latent))
-            print("BIC_naive_from_latent:", np.mean(
-                bene_BIC_naive_from_latent), "±", np.std(bene_BIC_naive_from_latent))
+            # print("AIC_naive_from_latent:", np.mean(
+            #     bene_AIC_naive_from_latent), "±", np.std(bene_AIC_naive_from_latent))
+            # print("BIC_naive_from_latent:", np.mean(
+            #     bene_BIC_naive_from_latent), "±", np.std(bene_BIC_naive_from_latent))
             print("MinGE:", np.mean(bene_MinGE), "±", np.std(bene_MinGE))
 
-            print("DNML:", np.mean(estimate_DNML), "±", np.std(estimate_DNML))
-            print("AIC_naive:", np.mean(estimate_AIC_naive),
-                  "±", np.std(estimate_AIC_naive))
-            print("BIC_naive:", np.mean(estimate_BIC_naive),
-                  "±", np.std(estimate_BIC_naive))
-            print("AIC_naive_from_latent:", np.mean(
-                estimate_AIC_naive_from_latent), "±", np.std(estimate_AIC_naive_from_latent))
-            print("BIC_naive_from_latent:", np.mean(
-                estimate_BIC_naive_from_latent), "±", np.std(estimate_BIC_naive_from_latent))
-            print("MinGE:", np.mean(estimate_MinGE),
-                  "±", np.std(estimate_MinGE))
+            # print("DNML:", np.mean(estimate_DNML), "±", np.std(estimate_DNML))
+            # print("AIC_naive:", np.mean(estimate_AIC_naive),
+            #       "±", np.std(estimate_AIC_naive))
+            # print("BIC_naive:", np.mean(estimate_BIC_naive),
+            #       "±", np.std(estimate_BIC_naive))
+            # print("AIC_naive_from_latent:", np.mean(
+            #     estimate_AIC_naive_from_latent), "±", np.std(estimate_AIC_naive_from_latent))
+            # print("BIC_naive_from_latent:", np.mean(
+            #     estimate_BIC_naive_from_latent), "±", np.std(estimate_BIC_naive_from_latent))
+            # print("MinGE:", np.mean(estimate_MinGE),
+            #       "±", np.std(estimate_MinGE))
 
 
 def plot_figure():
@@ -323,7 +323,6 @@ def calc_new_metrics(result):
 
 def realworld():
     dataset_name_list = ["ca-AstroPh", "ca-CondMat", "ca-GrQc", "ca-HepPh"]
-    # dataset_name_list = ["ca-GrQc",  "ca-HepPh"]
 
     n_dim_list = [2, 4, 8, 16, 32, 64]
 
@@ -353,13 +352,15 @@ def realworld():
             np.argmin(result["MinGE"].values)]
 
         print(dataset_name)
+        print("Selected Dimensionality")
         print("DNML:", D_DNML)
         print("AIC:", D_AIC)
         print("BIC:", D_BIC)
         print("MinGE:", D_MinGE)
 
-        print(result["AUC_latent"])
-        print(result["AUC_naive"])
+        print("AUCs")
+        print(result[["model_n_dims", "AUC_latent"]])
+        print(result[["model_n_dims", "AUC_naive"]])
 
         # 各criterionの値
         plt.clf()
@@ -493,10 +494,10 @@ def result_wn(model_n_dims, dataset_name):
     cor_MinGE, _ = stats.spearmanr(
         is_a_score_latent_list, -result["MinGE"].values)
 
-    print("cor_DNML:", cor_DNML)
-    print("cor_AIC:", cor_AIC)
-    print("cor_BIC:", cor_BIC)
-    print("cor_MinGE:", cor_MinGE)
+    # print("cor_DNML:", cor_DNML)
+    # print("cor_AIC:", cor_AIC)
+    # print("cor_BIC:", cor_BIC)
+    # print("cor_MinGE:", cor_MinGE)
 
     plt.clf()
     fig = plt.figure(figsize=(8, 5))
@@ -557,13 +558,14 @@ def result_wn(model_n_dims, dataset_name):
 
 if __name__ == "__main__":
 
-    print("Plot Example Figure")
-    plot_figure()
-    print("Results of Artificial Datasets")
+    # print("Plot Example Figure")
+    # plot_figure()
+    print("******Results of Artificial Datasets******")
+    print("Benefits")
     artificial()
-    print("Results of Scientific Collaboration Networks")
+    print("******Results of Scientific Collaboration Networks******")
     realworld()
-    print("Results of WN dataset")
+    print("******Results of WN dataset******")
     dataset_name_list = [
         "animal",
         "group",
