@@ -79,8 +79,8 @@ def is_a_score(is_a, n_dim, lorentz_table, alpha=1000):
         pass
 
     print("Dim ", n_dim, ": ", score_sum / len(is_a))
-    print("nodes:", len(lorentz_table))
-    print("is-a:", len(is_a))
+    # print("nodes:", len(lorentz_table))
+    # print("is-a:", len(is_a))
 
     return score_sum / len(is_a)
 

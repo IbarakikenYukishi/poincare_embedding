@@ -15,29 +15,12 @@ RESULTS = "results"
 
 
 def artificial():
-
-    # D_true_list = [4, 8, 16]
     D_true_list = [16]
-
     n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
     n_graphs = 12
     T_gap = 2
 
     for D_true in D_true_list:
-        # if D_true == 4:
-        #     label = [0, 1, 0, 0, 0, 0]
-        # elif D_true == 8:
-        #     label = [0, 0, 1, 0, 0, 0]
-        # elif D_true == 16:
-        #     label = [0, 0, 0, 1, 0, 0]
-
-        # if D_true == 4:
-        #     label = [0, 1, 0, 0, 0]
-        # elif D_true == 8:
-        #     label = [0, 0, 1, 0, 0]
-        # elif D_true == 16:
-        #     label = [0, 0, 0, 1, 0]
-
         for n_nodes in n_nodes_list:
             bene_DNML = []
             bene_AIC_naive = []
@@ -60,18 +43,6 @@ def artificial():
                     RESULTS + "/dim_" + str(D_true) + "/result_" + str(n_nodes) +
                     "_" + str(n_graph) + "_MinGE.csv")
 
-                # if D_true<=16:
-                #     result = result.drop(result.index[[5]])
-                #     result_MinGE = result_MinGE.drop(result_MinGE.index[[5]])
-                # if D_true<=8:
-                #     result = result.drop(result.index[[4]])
-                #     result_MinGE = result_MinGE.drop(result_MinGE.index[[4]])
-                # if D_true<=4:
-                #     result = result.drop(result.index[[3]])
-                #     result_MinGE = result_MinGE.drop(result_MinGE.index[[3]])
-
-                # print(label_ranking_average_precision_score([label], [-result["DNML_codelength"].values]))
-
                 D_DNML = result["model_n_dims"].values[
                     np.argmin(result["DNML_codelength"].values)]
                 D_AIC_naive = result["model_n_dims"].values[
@@ -91,16 +62,6 @@ def artificial():
                 estimate_AIC_naive_from_latent.append(D_AIC_naive_from_latent)
                 estimate_BIC_naive_from_latent.append(D_BIC_naive_from_latent)
                 estimate_MinGE.append(D_MinGE)
-
-                # bene_DNML.append(
-                #     label_ranking_average_precision_score([label], [-result["DNML_codelength"].values]))
-                # bene_AIC.append(
-                #     label_ranking_average_precision_score([label], [-result["AIC_naive"].values]))
-                # bene_BIC.append(
-                #     label_ranking_average_precision_score([label], [-result["BIC_naive"].values]))
-                # bene_MinGE.append(
-                # label_ranking_average_precision_score([label],
-                # [-result_MinGE["MinGE"].values]))
 
                 bene_DNML.append(
                     max(0, 1 - abs(np.log2(D_DNML) - np.log2(D_true)) / T_gap))
@@ -173,30 +134,14 @@ def artificial():
                   "±", np.std(bene_AIC_naive))
             print("BIC_naive:", np.mean(bene_BIC_naive),
                   "±", np.std(bene_BIC_naive))
-            # print("AIC_naive_from_latent:", np.mean(
-            #     bene_AIC_naive_from_latent), "±", np.std(bene_AIC_naive_from_latent))
-            # print("BIC_naive_from_latent:", np.mean(
-            #     bene_BIC_naive_from_latent), "±", np.std(bene_BIC_naive_from_latent))
             print("MinGE:", np.mean(bene_MinGE), "±", np.std(bene_MinGE))
 
-            # print("DNML:", np.mean(estimate_DNML), "±", np.std(estimate_DNML))
-            # print("AIC_naive:", np.mean(estimate_AIC_naive),
-            #       "±", np.std(estimate_AIC_naive))
-            # print("BIC_naive:", np.mean(estimate_BIC_naive),
-            #       "±", np.std(estimate_BIC_naive))
-            # print("AIC_naive_from_latent:", np.mean(
-            #     estimate_AIC_naive_from_latent), "±", np.std(estimate_AIC_naive_from_latent))
-            # print("BIC_naive_from_latent:", np.mean(
-            #     estimate_BIC_naive_from_latent), "±", np.std(estimate_BIC_naive_from_latent))
-            # print("MinGE:", np.mean(estimate_MinGE),
-            #       "±", np.std(estimate_MinGE))
 
 
 def plot_figure():
 
     result = pd.read_csv(RESULTS + "/dim_16/result_6400_3.csv")
     result = result.fillna(9999999999999)
-    # result = result.drop(result.index[[5]])
     D_DNML = result["model_n_dims"].values[
         np.argmin(result["DNML_codelength"].values)]
 
@@ -309,16 +254,6 @@ def calc_new_metrics(result):
 
     criterion_AIC_list = np.array(criterion_AIC_list)
     criterion_BIC_list = np.array(criterion_BIC_list)
-
-    # print(criterion_DNML_list)
-    # print(criterion_AIC_list)
-    # print(criterion_BIC_list)
-    # print(criterion_MinGE_list)
-
-    # print("DNML:", np.average(criterion_DNML_list))
-    # print("AIC:", np.average(criterion_AIC_list))
-    # print("BIC:", np.average(criterion_BIC_list))
-    # print("MinGE:", np.average(criterion_MinGE_list))
 
 
 def realworld():
@@ -592,6 +527,7 @@ if __name__ == "__main__":
     bene_BIC_naive = np.array(bene_BIC_naive)
     bene_MinGE = np.array(bene_MinGE)
 
+    print("Benefits of WN datasets")
     print("DNML:", np.mean(bene_DNML), "±", np.std(bene_DNML))
     print("AIC_naive:", np.mean(bene_AIC_naive),
           "±", np.std(bene_AIC_naive))
