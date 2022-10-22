@@ -137,7 +137,6 @@ def artificial():
             print("MinGE:", np.mean(bene_MinGE), "±", np.std(bene_MinGE))
 
 
-
 def plot_figure():
 
     result = pd.read_csv(RESULTS + "/dim_16/result_6400_3.csv")
@@ -428,11 +427,6 @@ def result_wn(model_n_dims, dataset_name):
         is_a_score_naive_list, -result["BIC_naive"].values)
     cor_MinGE, _ = stats.spearmanr(
         is_a_score_latent_list, -result["MinGE"].values)
-
-    # print("cor_DNML:", cor_DNML)
-    # print("cor_AIC:", cor_AIC)
-    # print("cor_BIC:", cor_BIC)
-    # print("cor_MinGE:", cor_MinGE)
 
     plt.clf()
     fig = plt.figure(figsize=(8, 5))
