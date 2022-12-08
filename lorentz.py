@@ -24,6 +24,7 @@ from torch import Tensor
 from scipy import integrate
 from sklearn import metrics
 import math
+import functools as fts
 from scipy import stats, special
 
 np.random.seed(0)
@@ -73,7 +74,7 @@ class RSGD(optim.Optimizer):
         params,
         lr_embeddings,
         lr_beta,
-        lr_sigma,
+        # lr_sigma,
         R,
         # sigma_max,
         # sigma_min,
@@ -84,7 +85,7 @@ class RSGD(optim.Optimizer):
         defaults = {
             "lr_embeddings": lr_embeddings,
             "lr_beta": lr_beta,
-            "lr_sigma": lr_sigma,
+            # "lr_sigma": lr_sigma,
             'R': R,
             # "sigma_max": sigma_max,
             # "sigma_min": sigma_min,
@@ -494,6 +495,11 @@ class Lorentz(nn.Module):
     ):
         pass
 
+    def params_mle(
+        self,
+    ):
+        pass
+
     def forward(
         self,
         pairs,
@@ -611,8 +617,6 @@ class PseudoUniform(Lorentz):
         sigma,
         sigma_min,
         sigma_max,
-        # beta_min,
-        # beta_max,
         init_range=0.01,
         sparse=True,
         device="cpu",
@@ -655,7 +659,7 @@ class PseudoUniform(Lorentz):
         with torch.no_grad():
             set_dim0(self.table.weight, self.R)
 
-    def sigma_hat(
+    def params_mle(
         self
     ):
         x = self.table.weight.data.cpu()
@@ -670,24 +674,6 @@ class PseudoUniform(Lorentz):
         self.sigma = sigma_hat
         print("sigma:", self.sigma)
         print("beta:", self.beta)
-
-    # def beta_hat(
-    #     self,
-    #     train_graph,
-    #     n_samples
-    # ):
-    #     x = self.table.weight.data
-    #     # r = arcosh(x[:, 0].reshape((-1, 1))).numpy()
-    #     # r = np.where(r <= 1e-6, 1e-6, r)[:, 0]
-
-    #     # n_samples = int(n_nodes * 0.1)
-
-    #     lr = calc_beta_hat(z=x, train_graph=train_graph, n_samples=n_samples,
-    # R=self.R, beta_min=self.beta_min, beta_max=self.beta_max)
-
-    #     self.beta = lr
-
-    #     print("beta:", self.beta)
 
     def latent_lik(
         self,
@@ -818,7 +804,8 @@ class WrappedNormal(Lorentz):
         n_dim,  # 次元より1つ多くデータを取る必要があることに注意
         R,
         Sigma,
-        epsilon,
+        beta,
+        eps_1,
         init_range=0.01,
         sparse=True,
         device="cpu",
@@ -836,96 +823,57 @@ class WrappedNormal(Lorentz):
         )
         self.Sigma = Sigma
         self.Sigma = self.Sigma.to(self.device)
-        self.epsilon = epsilon
+        self.eps_1 = eps_1
 
-        nn.init.normal(self.table.weight, 0, init_range)
+        # nn.init.normal(self.table.weight, 0, init_range)
 
-        # 0次元目をセット
-        with torch.no_grad():
-            set_dim0(self.table.weight, self.R)
+        # # 0次元目をセット
+        # with torch.no_grad():
+        #     set_dim0(self.table.weight, self.R)
 
-    def Sigma_hat(
+    def params_mle(
         self
     ):
         z = self.table.weight.data
-        mu = torch.zeros((1, self.n_dim + 1)).to(self.device)
-        mu[0] = 1
+        mu = torch.zeros((self.n_nodes, self.n_dim + 1)).to(self.device)
+        mu[:, 0] = 1
 
-        z_prime = log_map(x, mu)
-        z_prime_ = z_prime[:, 1:]
+        v_ = log_map(z, mu)
+        v = v_[:, 1:]
 
-        self.Sigma = z_prime_.T.dot(z_prime_) / self.n_dim
+        self.Sigma = torch.mm(v.T / self.n_nodes, v)
         print(self.Sigma)
 
     def latent_lik(
         self,
         x,
-        polar=False
     ):
+        n_subnodes = x.shape[0]
 
-        lik += (self.n_dim / 2) * torch.log(2 * np.pi) + \
-            0.5 * torch.det(self.Sigma)
+        # 定数項
+        lik = torch.ones(n_subnodes).to(self.device) * ((self.n_dim / 2) * torch.log(torch.tensor(2 * np.pi).to(self.device)) +
+                                                        0.5 * torch.log(torch.det(self.Sigma) + 0.000001))
 
-        # 半径方向
-        r = arcosh(torch.sqrt(
-            1 + (x[:, 1:]**2).sum(dim=1, keepdim=True))).double()
-        r = torch.where(r <= 1e-6, 1e-6, r)[:, 0]
-
-        # rの尤度
-        lik = -(self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * self.sigma *
-                                                           r) + 0.00001) + self.sigma * r - torch.log(torch.Tensor([2]).to(self.device)))
-
-        # rの正規化項
-        log_C_D = calc_log_C_D(n_dim=self.n_dim, sigma=self.sigma, R=self.R)
-
-        lik = lik + log_C_D
-
-        if polar:
-            x_ = x[:, 1:]
-            x_ = x_**2
-            x_ = torch.cumsum(
-                x_[:, torch.arange(self.n_dim - 1, -1, -1)], dim=1)  # j番目がDからD-jの和
-            x_ = x_[:, torch.arange(self.n_dim - 1, -1, -1)]  # j番目がDからj+1の和
-            x_ = torch.max(torch.Tensor([[0.000001]]).to(self.device), x_)
-            # 角度方向
-            sin_theta = torch.zeros(
-                (x.shape[0], self.n_dim - 1)).to(self.device)
-            for j in range(1, self.n_dim - 1):
-                sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
-
-            # 角度方向の尤度
-            for j in range(1, self.n_dim - 1):
-                lik = lik - (self.n_dim - 1 - j) * torch.log(sin_theta[:, j])
-                # 正規化項を足す
-                lik = lik + torch.log(self.I_D[j])
-
-            lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
-
-        else:
-            # 角度方向の尤度
-            for j in range(1, self.n_dim - 1):
-                # 正規化項を足す
-                lik = lik + torch.log(self.I_D[j])
-
-            lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
-
-            # ヤコビアン由来の項
-            lik = lik + (self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * r) +
-                                                      0.00001) + r - torch.log(torch.Tensor([2]).to(self.device)))
-
-            lik = lik + torch.log(1 + torch.exp(-2 * r) + 0.00001) + \
-                r - torch.log(torch.Tensor([2]).to(self.device))
+        # データから決まる項
+        mu = torch.zeros((x.shape[0], self.n_dim + 1)).to(self.device)
+        mu[:, 0] = 1
+        v_ = log_map(x, mu)  # tangent vector
+        v = v_[:, 1:]
+        Sigma_pinv = torch.linalg.pinv(self.Sigma)  # Pseudo-inverse
+        lik += 0.5 * torch.diag(v.mm(Sigma_pinv.mm(v.T)), 0)
 
         return lik
 
     def get_PC(
         self
     ):
-    ret = (self.n_dim - self.n_dim * self.n_nodes / 2) * np.log(2) + (self.n_dim * self.n_nodes / 2) * \
-        np.log(self.n_nodes) - multgamma_ln(self.n_nodes / 2, self.n_dim)
-    ret += -self.n_dim * self.n_nodes / 2 - self.n_dim * \
-        np.log(self.n_dim - 1) - (self.n_dim *
-                                  (self.n_dim + 1) / 2) * np.log(self.epsilon)
+        ret = 0
+        ret += self.n_dim * np.log(2 / (self.n_dim - 1))
+        ret += (1 - self.n_dim) * self.n_dim * np.log(self.epsilon_1) / 2
+        ret += (self.n_nodes * self.n_dim / 2) * np.log(self.n_nodes /
+                                                        (2 * np.e)) - multigamma_ln(self.n_dim / 2, self.n_dim)
+
+        return ret
 
 
 def CV_HGG(
@@ -1067,7 +1015,6 @@ def LinkPrediction(
     lr_embeddings,
     lr_epoch_10,
     lr_beta,
-    lr_sigma,
     sigma_min,
     sigma_max,
     beta_min,
@@ -1096,45 +1043,63 @@ def LinkPrediction(
 
     # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
     # 平均次数とかから逆算できる気がする。
-    model_latent = PseudoUniform(
+    # model_latent = PseudoUniform(
+    #     n_nodes=params_dataset['n_nodes'],
+    #     n_dim=model_n_dim,  # モデルの次元
+    #     R=params_dataset['R'],
+    #     sigma=1.0,
+    #     sigma_min=sigma_min,
+    #     sigma_max=sigma_max,
+    #     beta=1.0,
+    #     init_range=0.001,
+    #     sparse=sparse,
+    #     device=device,
+    #     calc_latent=True
+    # )
+    # model_naive = PseudoUniform(
+    #     n_nodes=params_dataset['n_nodes'],
+    #     n_dim=model_n_dim,  # モデルの次元
+    #     R=params_dataset['R'],
+    #     sigma=1.0,
+    #     sigma_min=sigma_min,
+    #     sigma_max=sigma_max,
+    #     beta=1.0,
+    #     init_range=0.001,
+    #     sparse=sparse,
+    #     device=device,
+    #     calc_latent=False
+    # )
+    model_latent = WrappedNormal(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
-        sigma=1.0,
-        # beta_min=beta_min,
-        # beta_max=beta_max,
-        sigma_min=sigma_min,
-        sigma_max=sigma_max,
+        Sigma=torch.eye(model_n_dim),
         beta=1.0,
+        eps_1=0.00001,
         init_range=0.001,
         sparse=sparse,
         device=device,
         calc_latent=True
     )
-    model_naive = PseudoUniform(
+    model_naive = WrappedNormal(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
-        sigma=1.0,
-        # beta_min=beta_min,
-        # beta_max=beta_max,
-        sigma_min=sigma_min,
-        sigma_max=sigma_max,
+        Sigma=torch.eye(model_n_dim),
         beta=1.0,
+        eps_1=0.00001,
         init_range=0.001,
         sparse=sparse,
         device=device,
         calc_latent=False
     )
+
     # 最適化関数。
     rsgd_latent = RSGD(
         model_latent.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
-        lr_sigma=lr_sigma,
         R=params_dataset['R'],
-        # sigma_max=sigma_max,
-        # sigma_min=sigma_min,
         beta_max=beta_max,
         beta_min=beta_min,
         device=device
@@ -1143,10 +1108,7 @@ def LinkPrediction(
         model_naive.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
-        lr_sigma=lr_sigma,
         R=params_dataset['R'],
-        # sigma_max=sigma_max,
-        # sigma_min=sigma_min,
         beta_max=beta_max,
         beta_min=beta_min,
         device=device
@@ -1169,11 +1131,10 @@ def LinkPrediction(
 
         losses_latent = []
         losses_naive = []
-        model_latent.sigma_hat()
-        # model.beta_hat(
-        #     train_graph=train_graph,
-        #     n_samples=int(len(train_graph)*0.5)
-        # )
+
+        # MLE
+        model_latent.params_mle()
+
         for pairs, labels in dataloader:
             pairs = pairs.reshape((-1, 2))
             labels = labels.reshape(-1)
@@ -1369,7 +1330,7 @@ def DNML_HGG(
     lr_embeddings,
     lr_epoch_10,
     lr_beta,
-    lr_sigma,
+    # lr_sigma,
     sigma_min,
     sigma_max,
     beta_min,
@@ -1423,7 +1384,7 @@ def DNML_HGG(
         model_latent.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
-        lr_sigma=lr_sigma,
+        # lr_sigma=lr_sigma,
         R=params_dataset['R'],
         # sigma_max=sigma_max,
         # sigma_min=sigma_min,
@@ -1435,7 +1396,7 @@ def DNML_HGG(
         model_naive.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
-        lr_sigma=lr_sigma,
+        # lr_sigma=lr_sigma,
         R=params_dataset['R'],
         # sigma_max=sigma_max,
         # sigma_min=sigma_min,
@@ -1458,6 +1419,7 @@ def DNML_HGG(
             rsgd_latent.param_groups[0]["lr_embeddings"] = lr_epoch_10
             rsgd_naive.param_groups[0]["lr_embeddings"] = lr_epoch_10
 
+        model_latent.sigma_hat()
         losses_latent = []
         losses_naive = []
         for pairs, labels in dataloader:
@@ -1590,11 +1552,12 @@ if __name__ == '__main__':
     }
 
     # パラメータ
-    burn_epochs = 800
+    # burn_epochs = 800
+    burn_epochs = 5
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     lr_beta = 0.001
-    lr_sigma = 0.001
+    # lr_sigma = 0.001
     sigma_max = 10.0
     sigma_min = 0.1
     beta_min = 0.1
@@ -1715,7 +1678,6 @@ if __name__ == '__main__':
             lr_embeddings=lr_embeddings,
             lr_epoch_10=lr_epoch_10,
             lr_beta=lr_beta,
-            lr_sigma=lr_sigma,
             sigma_min=sigma_min,
             sigma_max=sigma_max,
             beta_min=beta_min,

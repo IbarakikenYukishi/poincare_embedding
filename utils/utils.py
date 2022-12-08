@@ -123,8 +123,11 @@ def log_map(
     z,
     mu
 ):
-    alpha = -lorentz_scalar_product(z, mu).reshape((-1, 1))
-    u = (arcosh(alpha) / torch.sqrt(alpha**2 - 1)) * (z - alpha * mu)
+    alpha = -lorentz_scalar_product(z, mu).reshape((-1, 1)).float()
+    alpha = torch.where(alpha > 1.0, alpha, torch.tensor(
+        [1.0], dtype=alpha.dtype).to(alpha.device))
+    u = (arcosh(alpha) / torch.sqrt(alpha**2 - 1 + 0.000001)) * \
+        (z - alpha * mu)  # ゼロ除算を防ぐ
     return u
 
 
