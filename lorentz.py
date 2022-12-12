@@ -148,319 +148,6 @@ class RSGD(optim.Optimizer):
                 p.data.copy_(update)
 
 
-# class Lorentz(nn.Module):
-
-#     def __init__(
-#         self,
-#         n_nodes,
-#         n_dim,  # 次元より1つ多くデータを取る必要があることに注意
-#         R,
-#         beta,
-#         sigma,
-#         sigma_min,
-#         sigma_max,
-#         # beta_min,
-#         # beta_max,
-#         init_range=0.01,
-#         sparse=True,
-#         device="cpu",
-#         calc_latent=True
-#     ):
-#         super().__init__()
-#         self.n_nodes = n_nodes
-#         self.n_dim = n_dim
-#         self.beta = nn.Parameter(torch.tensor(beta))
-#         # self.beta = beta
-#         self.sigma = sigma
-#         self.sigma_min = sigma_min
-#         self.sigma_max = sigma_max
-#         # self.beta_min = beta_min
-#         # self.beta_max = beta_max
-#         # self.sigma = nn.Parameter(torch.tensor(sigma))
-#         self.R = R
-#         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
-#         self.device = device
-#         self.calc_latent = calc_latent
-
-#         self.I_D = torch.zeros(self.n_dim - 1)  # 0番目は空
-#         for j in range(1, self.n_dim - 1):
-#             numerator = lambda theta: np.sin(theta)**(self.n_dim - 1 - j)
-#             self.I_D[j] = integrate.quad(numerator, 0, np.pi)[0]
-
-#         print("分母:", self.I_D)
-
-#         self.avg_codelength = torch.zeros(self.n_dim - 1)
-
-#         for j in range(1, self.n_dim - 1):
-#             numerator = lambda theta: -(np.sin(theta)**(self.n_dim - 1 - j) / self.I_D[j].numpy()) * (
-#                 (self.n_dim - 1 - j) * np.log(np.sin(theta)) - np.log(self.I_D[j].numpy()))
-#             self.avg_codelength[j] = integrate.quad(numerator, 0, np.pi)[0]
-
-#         print("平均符号長:", self.avg_codelength)
-
-#         # nn.init.uniform_(self.table.weight, -init_range, init_range)
-#         nn.init.normal(self.table.weight, 0, init_range)
-
-#         # 0次元目をセット
-#         with torch.no_grad():
-#             set_dim0(self.table.weight, self.R)
-
-#     def sigma_hat(
-#         self
-#     ):
-#         x = self.table.weight.data.cpu()
-#         r = arcosh(x[:, 0].reshape((-1, 1))).numpy()
-#         r = np.where(r <= 1e-6, 1e-6, r)[:, 0]
-
-#         sigma_list, ret, sigma_hat = calc_likelihood_list(
-# r, n_dim=self.n_dim, R=self.R, sigma_min=self.sigma_min,
-# sigma_max=self.sigma_max, DIV=1000)
-
-#         print(r)
-
-#         self.sigma = sigma_hat
-#         print("sigma:", self.sigma)
-#         print("beta:", self.beta)
-
-#     # def beta_hat(
-#     #     self,
-#     #     train_graph,
-#     #     n_samples
-#     # ):
-#     #     x = self.table.weight.data
-#     #     # r = arcosh(x[:, 0].reshape((-1, 1))).numpy()
-#     #     # r = np.where(r <= 1e-6, 1e-6, r)[:, 0]
-
-#     #     # n_samples = int(n_nodes * 0.1)
-
-#     #     lr = calc_beta_hat(z=x, train_graph=train_graph, n_samples=n_samples,
-#     # R=self.R, beta_min=self.beta_min, beta_max=self.beta_max)
-
-#     #     self.beta = lr
-
-#     #     print("beta:", self.beta)
-
-#     def latent_lik(
-#         self,
-#         x,
-#         polar=False
-#     ):
-#         # 半径方向
-#         r = arcosh(torch.sqrt(
-#             1 + (x[:, 1:]**2).sum(dim=1, keepdim=True))).double()
-#         r = torch.where(r <= 1e-6, 1e-6, r)[:, 0]
-
-#         # rの尤度
-#         lik = -(self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * self.sigma *
-# r) + 0.00001) + self.sigma * r -
-# torch.log(torch.Tensor([2]).to(self.device)))
-
-#         # rの正規化項
-#         log_C_D = calc_log_C_D(n_dim=self.n_dim, sigma=self.sigma, R=self.R)
-
-#         lik = lik + log_C_D
-
-#         if polar:
-#             x_ = x[:, 1:]
-#             x_ = x_**2
-#             x_ = torch.cumsum(
-#                 x_[:, torch.arange(self.n_dim - 1, -1, -1)], dim=1)  # j番目がDからD-jの和
-#             x_ = x_[:, torch.arange(self.n_dim - 1, -1, -1)]  # j番目がDからj+1の和
-#             x_ = torch.max(torch.Tensor([[0.000001]]).to(self.device), x_)
-#             # 角度方向
-#             sin_theta = torch.zeros(
-#                 (x.shape[0], self.n_dim - 1)).to(self.device)
-#             for j in range(1, self.n_dim - 1):
-#                 sin_theta[:, j] = (x_[:, j] / x_[:, j - 1])**0.5
-
-#             # 角度方向の尤度
-#             for j in range(1, self.n_dim - 1):
-#                 lik = lik - (self.n_dim - 1 - j) * torch.log(sin_theta[:, j])
-#                 # 正規化項を足す
-#                 lik = lik + torch.log(self.I_D[j])
-
-#             lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
-
-#         else:
-#             # 角度方向の尤度
-#             for j in range(1, self.n_dim - 1):
-#                 # 正規化項を足す
-#                 lik = lik + torch.log(self.I_D[j])
-
-#             lik = lik + torch.log(2 * torch.Tensor([np.pi])).to(self.device)
-
-#             # ヤコビアン由来の項
-#             lik = lik + (self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * r) +
-# 0.00001) + r - torch.log(torch.Tensor([2]).to(self.device)))
-
-#             lik = lik + torch.log(1 + torch.exp(-2 * r) + 0.00001) + \
-#                 r - torch.log(torch.Tensor([2]).to(self.device))
-
-#         return lik
-
-#     def forward(
-#         self,
-#         pairs,
-#         labels
-#     ):
-#         # zを与えた下でのyの尤度
-#         loss = self.lik_y_given_z(
-#             pairs,
-#             labels
-#         )
-
-#         # z自体のロス
-#         # 座標を取得
-#         us = self.table(pairs[:, 0])
-#         vs = self.table(pairs[:, 1])
-
-#         if self.calc_latent:  # calc_latentがTrueの時のみ計算する
-#             lik_us = self.latent_lik(us)
-#             lik_vs = self.latent_lik(vs)
-#             loss = loss + (lik_us + lik_vs) / (self.n_nodes - 1)
-
-#         return loss
-
-#     def lik_y_given_z(
-#         self,
-#         pairs,
-#         labels
-#     ):
-#         # 座標を取得
-#         us = self.table(pairs[:, 0])
-#         vs = self.table(pairs[:, 1])
-
-#         # ロス計算
-#         dist = h_dist(us, vs)
-#         loss = torch.clone(labels).float()
-#         # 数値計算の問題をlogaddexpで回避
-#         # zを固定した下でのyのロス
-#         loss = torch.where(
-#             loss == 1,
-#             torch.logaddexp(torch.tensor([0.0]).to(
-#                 self.device), self.beta * (dist - self.R)),
-#             torch.logaddexp(torch.tensor([0.0]).to(
-#                 self.device), -self.beta * (dist - self.R))
-#         )
-
-#         return loss
-
-#     def z(
-#         self
-#     ):
-#         z = self.table.weight.data
-#         lik_z = self.latent_lik(z).sum().item()
-
-#         return lik_z
-
-#     def get_lorentz_table(self):
-#         return self.table.weight.data.cpu().numpy()
-
-#     def get_poincare_table(self):
-#         table = self.table.weight.data.cpu().numpy()
-#         return table[:, 1:] / (
-#             table[:, :1] + 1
-#         )  # diffeomorphism transform to poincare ball
-
-#     def calc_probability(
-#         self,
-#         samples,
-#     ):
-#         samples_ = torch.Tensor(samples).to(self.device).long()
-
-#         # 座標を取得
-#         us = self.table(samples_[:, 0])
-#         vs = self.table(samples_[:, 1])
-
-#         dist = h_dist(us, vs)
-#         p = torch.exp(-torch.logaddexp(torch.tensor([0.0]).to(
-#             self.device), self.beta * (dist - self.R)))
-#         print(p)
-
-#         return p.detach().cpu().numpy()
-
-#     def calc_dist(
-#         self,
-#         samples,
-#     ):
-#         samples_ = torch.Tensor(samples).to(self.device).long()
-
-#         # 座標を取得
-#         us = self.table(samples_[:, 0])
-#         vs = self.table(samples_[:, 1])
-
-#         dist = h_dist(us, vs)
-
-#         return dist.detach().cpu().numpy()
-
-#     def get_PC(
-#         self,
-#         sigma_max,
-#         sigma_min,
-#         beta_max,
-#         beta_min,
-#         sampling=True
-#     ):
-#         if sampling == False:
-#             # DNMLのPCの計算
-#             x_e = self.get_poincare_table()
-#         else:
-#             idx = np.array(range(self.n_nodes))
-#             idx = np.random.permutation(idx)[:int(self.n_nodes * 0.1)]
-#             x_e = self.get_poincare_table()[idx, :]
-
-#         n_nodes_sample = len(x_e)
-#         print(n_nodes_sample)
-
-#         norm_x_e_2 = np.sum(x_e**2, axis=1).reshape((-1, 1))
-#         denominator_mat = (1 - norm_x_e_2) * (1 - norm_x_e_2.T)
-#         numerator_mat = norm_x_e_2 + norm_x_e_2.T
-#         numerator_mat -= 2 * x_e.dot(x_e.T)
-#         # arccoshのエラー対策
-#         for i in range(n_nodes_sample):
-#             numerator_mat[i, i] = 0
-#         dist_mat = np.arccosh(1 + 2 * numerator_mat / denominator_mat)
-
-#         is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
-#         dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
-#         # dist_mat
-#         X = self.R - dist_mat
-#         for i in range(n_nodes_sample):
-#             X[i, i] = 0
-
-#         # I_n
-#         def sqrt_I_n(
-#             beta
-#         ):
-# return np.sqrt(np.sum(X**2 / ((np.cosh(beta * X / 2.0) * 2)**2)) /
-# (n_nodes_sample * (n_nodes_sample - 1)))
-
-#         # I
-#         def sqrt_I(
-#             sigma
-#         ):
-#             # denominator = self.integral_sinh(self.n_dim - 1)
-#             denominator = integral_sinh(
-# n=self.n_dim - 1, n_dim=self.n_dim, sigma=self.sigma, R=self.R,
-# exp_C=self.sigma * self.R)
-
-#             numerator_1 = lambda r: (r**2) * ((np.exp(self.sigma * (r - self.R)) + np.exp(-self.sigma * (r + self.R)))**2) * (
-#                 (np.exp(self.sigma * (r - self.R)) - np.exp(-self.sigma * (r + self.R)))**(self.n_dim - 3))
-#             first_term = ((self.n_dim - 1)**2) * \
-#                 integrate.quad(numerator_1, 0, self.R)[0] / denominator
-
-#             numerator_2 = lambda r: r * (np.exp(self.sigma * (r - self.R)) + np.exp(-self.sigma * (r + self.R))) * (
-#                 (np.exp(self.sigma * (r - self.R)) - np.exp(-self.sigma * (r + self.R)))**(self.n_dim - 2))
-#             second_term = (
-#                 (self.n_dim - 1) * integrate.quad(numerator_2, 0, self.R)[0] / denominator)**2
-
-#             return np.sqrt(np.abs(first_term - second_term))
-
-# return 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4
-# * np.pi)) + np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5
-# * (np.log(self.n_nodes) - np.log(2 * np.pi)) +
-# np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
-
 class Lorentz(nn.Module):
 
     def __init__(
@@ -862,6 +549,14 @@ class WrappedNormal(Lorentz):
         Sigma_pinv = torch.linalg.pinv(self.Sigma)  # Pseudo-inverse
         lik += 0.5 * torch.diag(v.mm(Sigma_pinv.mm(v.T)), 0)
 
+        # -log Jacobian
+        v_norm = tangent_norm(v_)
+        v_norm = torch.where(
+            v_norm <= 1e-6, torch.tensor(1e-6).to(self.device), v_norm)
+        # print(v_norm)
+        lik += (self.n_dim - 1) * (torch.log(1 - torch.exp(-2 * v_norm)) +
+                                   v_norm - torch.tensor([np.log(2)]).to(self.device) - torch.log(v_norm))
+
         return lik
 
     def get_PC(
@@ -869,7 +564,7 @@ class WrappedNormal(Lorentz):
     ):
         ret = 0
         ret += self.n_dim * np.log(2 / (self.n_dim - 1))
-        ret += (1 - self.n_dim) * self.n_dim * np.log(self.epsilon_1) / 2
+        ret += (1 - self.n_dim) * self.n_dim * np.log(self.eps_1) / 2
         ret += (self.n_nodes * self.n_dim / 2) * np.log(self.n_nodes /
                                                         (2 * np.e)) - multigamma_ln(self.n_dim / 2, self.n_dim)
 
@@ -1019,6 +714,7 @@ def LinkPrediction(
     sigma_max,
     beta_min,
     beta_max,
+    eps_1,
     device,
     loader_workers=16,
     shuffle=True,
@@ -1043,60 +739,69 @@ def LinkPrediction(
 
     # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
     # 平均次数とかから逆算できる気がする。
-    # model_latent = PseudoUniform(
-    #     n_nodes=params_dataset['n_nodes'],
-    #     n_dim=model_n_dim,  # モデルの次元
-    #     R=params_dataset['R'],
-    #     sigma=1.0,
-    #     sigma_min=sigma_min,
-    #     sigma_max=sigma_max,
-    #     beta=1.0,
-    #     init_range=0.001,
-    #     sparse=sparse,
-    #     device=device,
-    #     calc_latent=True
-    # )
-    # model_naive = PseudoUniform(
-    #     n_nodes=params_dataset['n_nodes'],
-    #     n_dim=model_n_dim,  # モデルの次元
-    #     R=params_dataset['R'],
-    #     sigma=1.0,
-    #     sigma_min=sigma_min,
-    #     sigma_max=sigma_max,
-    #     beta=1.0,
-    #     init_range=0.001,
-    #     sparse=sparse,
-    #     device=device,
-    #     calc_latent=False
-    # )
-    model_latent = WrappedNormal(
+    model_hgg = PseudoUniform(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
-        Sigma=torch.eye(model_n_dim),
+        sigma=1.0,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
         beta=1.0,
-        eps_1=0.00001,
         init_range=0.001,
         sparse=sparse,
         device=device,
         calc_latent=True
     )
-    model_naive = WrappedNormal(
+    model_wnd = WrappedNormal(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
         Sigma=torch.eye(model_n_dim),
         beta=1.0,
-        eps_1=0.00001,
+        eps_1=eps_1,
+        init_range=0.001,
+        sparse=sparse,
+        device=device,
+        calc_latent=True
+    )
+    model_naive = PseudoUniform(
+        n_nodes=params_dataset['n_nodes'],
+        n_dim=model_n_dim,  # モデルの次元
+        R=params_dataset['R'],
+        sigma=1.0,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        beta=1.0,
         init_range=0.001,
         sparse=sparse,
         device=device,
         calc_latent=False
     )
+    # model_naive = WrappedNormal(
+    #     n_nodes=params_dataset['n_nodes'],
+    #     n_dim=model_n_dim,  # モデルの次元
+    #     R=params_dataset['R'],
+    #     Sigma=torch.eye(model_n_dim),
+    #     beta=1.0,
+    #     eps_1=0.00001,
+    #     init_range=0.001,
+    #     sparse=sparse,
+    #     device=device,
+    #     calc_latent=False
+    # )
 
     # 最適化関数。
-    rsgd_latent = RSGD(
-        model_latent.parameters(),
+    rsgd_hgg = RSGD(
+        model_hgg.parameters(),
+        lr_embeddings=lr_embeddings,
+        lr_beta=lr_beta,
+        R=params_dataset['R'],
+        beta_max=beta_max,
+        beta_min=beta_min,
+        device=device
+    )
+    rsgd_wnd = RSGD(
+        model_wnd.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
         R=params_dataset['R'],
@@ -1114,7 +819,8 @@ def LinkPrediction(
         device=device
     )
 
-    model_latent.to(device)
+    model_hgg.to(device)
+    model_wnd.to(device)
     model_naive.to(device)
 
     # loss_history = []
@@ -1126,14 +832,17 @@ def LinkPrediction(
         #     rsgd.param_groups[0]["lr_embeddings"] /= 5
         if epoch == 10:
             # batchサイズに対応して学習率変更
-            rsgd_latent.param_groups[0]["lr_embeddings"] = lr_epoch_10
+            rsgd_hgg.param_groups[0]["lr_embeddings"] = lr_epoch_10
+            rsgd_wnd.param_groups[0]["lr_embeddings"] = lr_epoch_10
             rsgd_naive.param_groups[0]["lr_embeddings"] = lr_epoch_10
 
-        losses_latent = []
+        losses_hgg = []
+        losses_wnd = []
         losses_naive = []
 
         # MLE
-        model_latent.params_mle()
+        model_hgg.params_mle()
+        model_wnd.params_mle()
 
         for pairs, labels in dataloader:
             pairs = pairs.reshape((-1, 2))
@@ -1142,12 +851,21 @@ def LinkPrediction(
             pairs = pairs.to(device)
             labels = labels.to(device)
 
-            rsgd_latent.zero_grad()
-            loss_latent = model_latent(pairs, labels).mean()
-            loss_latent.backward()
-            rsgd_latent.step()
-            losses_latent.append(loss_latent)
+            # DNML-HGG
+            rsgd_hgg.zero_grad()
+            loss_hgg = model_hgg(pairs, labels).mean()
+            loss_hgg.backward()
+            rsgd_hgg.step()
+            losses_hgg.append(loss_hgg)
 
+            # DNML-WND
+            rsgd_wnd.zero_grad()
+            loss_wnd = model_wnd(pairs, labels).mean()
+            loss_wnd.backward()
+            rsgd_wnd.step()
+            losses_wnd.append(loss_wnd)
+
+            # Naive model
             rsgd_naive.zero_grad()
             loss_naive = model_naive(pairs, labels).mean()
             loss_naive.backward()
@@ -1155,8 +873,10 @@ def LinkPrediction(
             losses_naive.append(loss_naive)
 
         # loss_history.append(torch.Tensor(losses).mean().item())
-        print("epoch:", epoch, ", loss:",
-              torch.Tensor(losses_latent).mean().item())
+        print("epoch:", epoch, ", loss_hgg:",
+              torch.Tensor(losses_hgg).mean().item())
+        print("epoch:", epoch, ", loss_wnd:",
+              torch.Tensor(losses_wnd).mean().item())
         print("loss_naive:",
               torch.Tensor(losses_naive).mean().item())
 
@@ -1177,63 +897,105 @@ def LinkPrediction(
 
     # -2*log(p)の計算
     # basescore_y_and_z = 0
-    basescore_y_given_z = 0
+    basescore_y_given_z_hgg = 0
+    basescore_y_given_z_wnd = 0
     basescore_y_given_z_naive = 0
     for pairs, labels in dataloader_all:
         pairs = pairs.to(device)
         labels = labels.to(device)
 
-        # basescore_y_and_z += model(pairs, labels).sum().item()
-        basescore_y_given_z += model_latent.lik_y_given_z(
+        basescore_y_given_z_hgg += model_hgg.lik_y_given_z(
+            pairs, labels).sum().item()
+        basescore_y_given_z_wnd += model_wnd.lik_y_given_z(
             pairs, labels).sum().item()
         basescore_y_given_z_naive += model_naive.lik_y_given_z(
             pairs, labels).sum().item()
 
-    basescore_z = model_latent.z()
+    basescore_z_hgg = model_hgg.z()
+    basescore_z_wnd = model_wnd.z()
 
-    basescore_y_given_z = basescore_y_given_z * (n_data / len(lik_data)) / 2
+    basescore_y_given_z_hgg = basescore_y_given_z_hgg * \
+        (n_data / len(lik_data)) / 2
+    basescore_y_given_z_wnd = basescore_y_given_z_wnd * \
+        (n_data / len(lik_data)) / 2
     basescore_y_given_z_naive = basescore_y_given_z_naive * \
         (n_data / len(lik_data)) / 2
 
-    basescore_y_and_z = basescore_y_given_z + basescore_z
+    basescore_y_and_z_hgg = basescore_y_given_z_hgg + basescore_z_hgg
+    basescore_y_and_z_wnd = basescore_y_given_z_wnd + basescore_z_wnd
 
-    AIC_naive_from_latent = basescore_y_given_z + \
-        (params_dataset['n_nodes'] * model_n_dim + 1)
-    BIC_naive_from_latent = basescore_y_given_z + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
-        np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
+    # AIC_naive_from_latent = basescore_y_given_z + \
+    #     (params_dataset['n_nodes'] * model_n_dim + 1)
+    # BIC_naive_from_latent = basescore_y_given_z + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
+    # np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] -
+    # 1) - np.log(2))
 
+    # Non-identifiable model
     AIC_naive = basescore_y_given_z_naive + \
         (params_dataset['n_nodes'] * model_n_dim + 1)
     BIC_naive = basescore_y_given_z_naive + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
         np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
 
-    pc_first, pc_second = model_latent.get_PC(
+    # DNML-HGG
+    pc_first, pc_second = model_hgg.get_PC(
         sigma_max, sigma_min, beta_max, beta_min, sampling=True)
-    DNML_codelength = basescore_y_and_z + pc_first + pc_second
+    DNML_HGG = basescore_y_and_z_hgg + pc_first + pc_second
 
-    # リンク予測の指標計算
-    # positive_prob = model.calc_probability(positive_samples)
-    # negative_prob = model.calc_probability(negative_samples)
+    AIC_HGG = basescore_y_and_z_hgg + 2
+    BIC_HGG = basescore_y_and_z_hgg + 0.5 * (np.log(params_dataset['n_nodes']) + np.log(
+        params_dataset['n_nodes'] - 1) - np.log(2)) + 0.5 * np.log(params_dataset['n_nodes'])
+
+    # DNML-WND
+    pc_wnd = model_wnd.get_PC()
+    DNML_WND = basescore_y_and_z_wnd + pc_wnd
+    AIC_WND = basescore_y_and_z_wnd + model_n_dim * (model_n_dim + 1) / 2 + 1
+    BIC_WND = basescore_y_and_z_wnd + 0.5 * (np.log(params_dataset['n_nodes']) + np.log(
+        params_dataset['n_nodes'] - 1) - np.log(2)) + (model_n_dim * (model_n_dim + 1) / 4) * np.log(params_dataset['n_nodes'])
+
+    # Calculate AUC from probability
+    def calc_AUC_from_prob(
+        positive_dist,
+        negative_dist
+    ):
+
+        pred = np.append(-positive_dist, -negative_dist)
+        ground_truth = np.append(np.ones(len(positive_dist)),
+                                 np.zeros(len(negative_dist)))
+        AUC = metrics.roc_auc_score(ground_truth, pred)
+        return AUC
 
     # latentを計算したものでのAUC
-    positive_prob = -model_latent.calc_dist(positive_samples)
-    negative_prob = -model_latent.calc_dist(negative_samples)
+    # positive_prob = -model_hgg.calc_dist(positive_samples)
+    # negative_prob = -model_hgg.calc_dist(negative_samples)
 
-    pred = np.append(positive_prob, negative_prob)
-    ground_truth = np.append(np.ones(len(positive_prob)),
-                             np.zeros(len(negative_prob)))
+    # pred = np.append(positive_prob, negative_prob)
+    # ground_truth = np.append(np.ones(len(positive_prob)),
+    #                          np.zeros(len(negative_prob)))
 
-    AUC_latent = metrics.roc_auc_score(ground_truth, pred)
+    AUC_HGG = calc_AUC_from_prob(
+        model_hgg.calc_dist(positive_samples),
+        model_hgg.calc_dist(negative_samples)
+    )
 
-    # naiveでのAUC
-    positive_prob = -model_naive.calc_dist(positive_samples)
-    negative_prob = -model_naive.calc_dist(negative_samples)
+    AUC_WND = calc_AUC_from_prob(
+        model_wnd.calc_dist(positive_samples),
+        model_wnd.calc_dist(negative_samples)
+    )
 
-    pred = np.append(positive_prob, negative_prob)
-    ground_truth = np.append(np.ones(len(positive_prob)),
-                             np.zeros(len(negative_prob)))
+    AUC_naive = calc_AUC_from_prob(
+        model_naive.calc_dist(positive_samples),
+        model_naive.calc_dist(negative_samples)
+    )
 
-    AUC_naive = metrics.roc_auc_score(ground_truth, pred)
+    # # naiveでのAUC
+    # positive_prob = -model_naive.calc_dist(positive_samples)
+    # negative_prob = -model_naive.calc_dist(negative_samples)
+
+    # pred = np.append(positive_prob, negative_prob)
+    # ground_truth = np.append(np.ones(len(positive_prob)),
+    #                          np.zeros(len(negative_prob)))
+
+    # AUC_naive = metrics.roc_auc_score(ground_truth, pred)
 
     if calc_groundtruth:
 
@@ -1255,64 +1017,92 @@ def LinkPrediction(
         p_negative = -dist.detach().cpu().numpy()
 
         pred_g = np.append(p_positive, p_negative)
-        GT_AUC = metrics.roc_auc_score(ground_truth, pred_g)
-        print("GT_AUC:", GT_AUC)
+        ground_truth = np.append(np.ones(len(p_positive)),
+                                 np.zeros(len(p_negative)))
+
+        AUC_GT = metrics.roc_auc_score(ground_truth, pred_g)
+        print("AUC_GT:", AUC_GT)
         gt_r = torch.Tensor(x_lorentz[:, 0])
         gt_r = torch.max(gt_r, torch.Tensor([1.0 + 0.00001]))
 
-        es_r_latent = torch.Tensor(model_latent.get_lorentz_table()[:, 0])
+        es_r_hgg = torch.Tensor(model_hgg.get_lorentz_table()[:, 0])
+        es_r_wnd = torch.Tensor(model_wnd.get_lorentz_table()[:, 0])
         es_r_naive = torch.Tensor(model_naive.get_lorentz_table()[:, 0])
         # es_r = torch.max(es_r, torch.Tensor([1.0 + 0.00001]))
         # es_r = torch.where(es_r <= 1.0+0.00001, torch.Tensor([1.0+0.0001]), es_r)[:, 0]
 
         print(gt_r)
-        print(es_r_latent)
+        print(es_r_hgg)
+        print(es_r_wnd)
         print(es_r_naive)
 
         gt_r = arcosh(gt_r)
-        es_r_latent = arcosh(es_r_latent)
+        es_r_hgg = arcosh(es_r_hgg)
+        es_r_wnd = arcosh(es_r_wnd)
         es_r_naive = arcosh(es_r_naive)
 
-        cor_latent, _ = stats.spearmanr(gt_r, es_r_latent)
+        cor_hgg, _ = stats.spearmanr(gt_r, es_r_hgg)
+        cor_wnd, _ = stats.spearmanr(gt_r, es_r_wnd)
         cor_naive, _ = stats.spearmanr(gt_r, es_r_naive)
-        print("cor_latent:", cor_latent)
+        print("cor_hgg:", cor_hgg)
+        print("cor_wnd:", cor_wnd)
         print("cor_naive:", cor_naive)
 
     else:
-        GT_AUC = None
-        cor_latent = None
+        AUC_GT = None
+        cor_hgg = None
+        cor_wnd = None
         cor_naive = None
 
-    print("p(y, z; theta):", basescore_y_and_z)
-    print("p(y|z; theta):", basescore_y_given_z)
-    print("p(z; theta):", basescore_z)
-    print("p(y; z, theta):", basescore_y_given_z_naive)
-    print("DNML:", DNML_codelength)
+    print("-log p_HGG(y, z):", basescore_y_and_z_hgg)
+    print("-log p_WND(y, z):", basescore_y_and_z_wnd)
+    print("-log p_HGG(y|z):", basescore_y_given_z_hgg)
+    print("-log p_WND(y|z):", basescore_y_given_z_wnd)
+    print("-log p_HGG(z):", basescore_z_hgg)
+    print("-log p_WND(z):", basescore_z_wnd)
+    print("-log p_naive(y; z):", basescore_y_given_z_naive)
+    print("DNML-HGG:", DNML_HGG)
+    print("DNML-WND:", DNML_WND)
     print("AIC_naive:", AIC_naive)
     print("BIC_naive:", BIC_naive)
-    print("AIC_naive_from_latent:", AIC_naive_from_latent)
-    print("BIC_naive_from_latent:", BIC_naive_from_latent)
-    print("AUC_latent:", AUC_latent)
+    print("AIC_HGG:", AIC_HGG)
+    print("BIC_HGG:", BIC_HGG)
+    print("AIC_WND:", AIC_WND)
+    print("BIC_WND:", BIC_WND)
+    # print("AIC_naive_from_latent:", AIC_naive_from_latent)
+    # print("BIC_naive_from_latent:", BIC_naive_from_latent)
+    print("AUC_HGG:", AUC_HGG)
+    print("AUC_WND:", AUC_WND)
     print("AUC_naive:", AUC_naive)
+    print("AUC_GT:", AUC_GT)
 
     ret = {
-        "basescore_y_and_z": basescore_y_and_z,
-        "basescore_y_given_z": basescore_y_given_z,
-        "basescore_z": basescore_z,
-        "basescore_y_given_z_naive": basescore_y_given_z_naive,
-        "DNML_codelength": DNML_codelength,
-        "pc_first": pc_first,
-        "pc_second": pc_second,
+        "DNML_HGG": DNML_HGG,
+        "AIC_HGG": AIC_HGG,
+        "BIC_HGG": BIC_HGG,
+        "DNML_WND": DNML_WND,
+        "AIC_WND": AIC_WND,
+        "BIC_WND": BIC_WND,
         "AIC_naive": AIC_naive,
         "BIC_naive": BIC_naive,
-        "AIC_naive_from_latent": AIC_naive_from_latent,
-        "BIC_naive_from_latent": BIC_naive_from_latent,
-        "AUC_latent": AUC_latent,
+        "AUC_HGG": AUC_HGG,
+        "AUC_WND": AUC_WND,
         "AUC_naive": AUC_naive,
-        "GT_AUC": GT_AUC,
-        "cor_latent": cor_latent,
+        "AUC_GT": AUC_GT,
+        "cor_hgg": cor_hgg,
+        "cor_wnd": cor_wnd,
         "cor_naive": cor_naive,
-        "model_latent": model_latent,
+        "-log p_HGG(y, z)": basescore_y_and_z_hgg,
+        "-log p_HGG(y|z)": basescore_y_given_z_hgg,
+        "-log p_HGG(z)": basescore_z_hgg,
+        "-log p_WND(y, z)": basescore_y_and_z_wnd,
+        "-log p_WND(y|z)": basescore_y_given_z_wnd,
+        "-log p_WND(z)": basescore_z_wnd,
+        "-log p_naive(y; z)": basescore_y_given_z_naive,
+        "pc_first": pc_first,
+        "pc_second": pc_second,
+        "model_hgg": model_hgg,
+        "model_wnd": model_wnd,
         "model_naive": model_naive
     }
 
@@ -1330,7 +1120,6 @@ def DNML_HGG(
     lr_embeddings,
     lr_epoch_10,
     lr_beta,
-    # lr_sigma,
     sigma_min,
     sigma_max,
     beta_min,
@@ -1552,8 +1341,8 @@ if __name__ == '__main__':
     }
 
     # パラメータ
-    # burn_epochs = 800
-    burn_epochs = 5
+    burn_epochs = 800
+    # burn_epochs = 5
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     lr_beta = 0.001
@@ -1562,6 +1351,7 @@ if __name__ == '__main__':
     sigma_min = 0.1
     beta_min = 0.1
     beta_max = 10.0
+    eps_1 = 0.000001
     # それ以外
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -1682,6 +1472,7 @@ if __name__ == '__main__':
             sigma_max=sigma_max,
             beta_min=beta_min,
             beta_max=beta_max,
+            eps_1=eps_1,
             device=device,
             loader_workers=16,
             shuffle=True,
@@ -1689,27 +1480,110 @@ if __name__ == '__main__':
             calc_groundtruth=True
         )
 
-        basescore_y_and_z_list.append(ret["basescore_y_and_z"])
-        basescore_y_given_z_list.append(ret["basescore_y_given_z"])
-        basescore_z_list.append(ret["basescore_z"])
-        basescore_y_given_z_naive_list.append(ret["basescore_y_given_z_naive"])
-        DNML_codelength_list.append(ret["DNML_codelength"])
-        pc_first_list.append(ret["pc_first"])
-        pc_second_list.append(ret["pc_second"])
-        AIC_naive_list.append(ret["AIC_naive"])
-        BIC_naive_list.append(ret["BIC_naive"])
-        AIC_naive_from_latent_list.append(ret["AIC_naive_from_latent"])
-        BIC_naive_from_latent_list.append(ret["BIC_naive_from_latent"])
-        AUC_latent_list.append(ret["AUC_latent"])
-        AUC_naive_list.append(ret["AUC_naive"])
-        GT_AUC_list.append(ret["GT_AUC"])
-        cor_latent_list.append(ret["cor_latent"])
-        cor_naive_list.append(ret["cor_naive"])
+        # basescore_y_and_z_list.append(ret["basescore_y_and_z"])
+        # basescore_y_given_z_list.append(ret["basescore_y_given_z"])
+        # basescore_z_list.append(ret["basescore_z"])
+        # basescore_y_given_z_naive_list.append(ret["basescore_y_given_z_naive"])
+        # DNML_codelength_list.append(ret["DNML_codelength"])
+        # pc_first_list.append(ret["pc_first"])
+        # pc_second_list.append(ret["pc_second"])
+        # AIC_naive_list.append(ret["AIC_naive"])
+        # BIC_naive_list.append(ret["BIC_naive"])
+        # AIC_naive_from_latent_list.append(ret["AIC_naive_from_latent"])
+        # BIC_naive_from_latent_list.append(ret["BIC_naive_from_latent"])
+        # AUC_latent_list.append(ret["AUC_latent"])
+        # AUC_naive_list.append(ret["AUC_naive"])
+        # GT_AUC_list.append(ret["GT_AUC"])
+        # cor_latent_list.append(ret["cor_latent"])
+        # cor_naive_list.append(ret["cor_naive"])
 
-        torch.save(ret["model_latent"].state_dict(),
-                   "temp/result_" + str(model_n_dim) + "_latent.pth")
+        torch.save(ret["model_hgg"].state_dict(),
+                   "temp/result_" + str(model_n_dim) + "_hgg.pth")
+        torch.save(ret["model_wnd"].state_dict(),
+                   "temp/result_" + str(model_n_dim) + "_wnd.pth")
         torch.save(ret["model_naive"].state_dict(),
                    "temp/result_" + str(model_n_dim) + "_naive.pth")
+
+        ret.pop('model_hgg')
+        ret.pop('model_wnd')
+        ret.pop('model_naive')
+
+        ret["model_n_dims"] = model_n_dim
+        ret["n_nodes"] = params_dataset["n_nodes"]
+        ret["n_dim"] = params_dataset["n_dim"]
+        ret["R"] = params_dataset["R"]
+        ret["sigma"] = params_dataset["sigma"]
+        ret["beta"] = params_dataset["beta"]
+        ret["burn_epochs"] = burn_epochs
+        ret["burn_batch_size"] = burn_batch_size
+        ret["n_max_positives"] = n_max_positives
+        ret["n_max_negatives"] = n_max_negatives
+        ret["lr_embeddings"] = lr_embeddings
+        ret["lr_epoch_10"] = lr_epoch_10
+        ret["lr_beta"] = lr_beta
+        ret["sigma_max"] = sigma_max
+        ret["sigma_min"] = sigma_min
+        ret["beta_max"] = beta_max
+        ret["beta_min"] = beta_min
+        ret["eps_1"] = eps_1
+
+        print(ret)
+
+        row = pd.DataFrame(ret.values(), index=ret.keys()).T
+
+        row = row.reindex(columns=[
+            "model_n_dims",
+            "n_nodes",
+            "n_dim",
+            "R",
+            "sigma",
+            "beta",
+            "DNML_HGG",
+            "AIC_HGG",
+            "BIC_HGG",
+            "DNML_WND",
+            "AIC_WND",
+            "BIC_WND",
+            "AIC_naive",
+            "BIC_naive",
+            "AUC_HGG",
+            "AUC_WND",
+            "AUC_naive",
+            "AUC_GT",
+            "cor_hgg",
+            "cor_wnd",
+            "cor_naive",
+            "-log p_HGG(y, z)",
+            "-log p_HGG(y|z)",
+            "-log p_HGG(z)",
+            "-log p_WND(y, z)",
+            "-log p_WND(y|z)",
+            "-log p_WND(z)",
+            "-log p_naive(y; z)",
+            "pc_first",
+            "pc_second",
+            "burn_epochs",
+            "n_max_positives",
+            "n_max_negatives",
+            "lr_embeddings",
+            "lr_epoch_10",
+            "lr_beta",
+            "sigma_max",
+            "sigma_min",
+            "beta_max",
+            "beta_min",
+            "eps_1"
+        ]
+        )
+
+        filepath = "result_lorentz.csv"
+
+        if os.path.exists(filepath):
+            result_previous = pd.read_csv(filepath)
+            result = pd.concat([result_previous, row])
+            result.to_csv(filepath, index=False)
+        else:
+            row.to_csv(filepath, index=False)
 
         # CV_score = CV_HGG(
         #     adj_mat=adj_mat,
@@ -1732,48 +1606,48 @@ if __name__ == '__main__':
         # )
         # CV_score_list.append(CV_score)
 
-    result["model_n_dims"] = model_n_dims
-    result["n_nodes"] = params_dataset["n_nodes"]
-    result["n_dim"] = params_dataset["n_dim"]
-    result["R"] = params_dataset["R"]
-    result["sigma"] = params_dataset["sigma"]
-    result["beta"] = params_dataset["beta"]
-    result["DNML_codelength"] = DNML_codelength_list
-    result["AIC_naive"] = AIC_naive_list
-    result["BIC_naive"] = BIC_naive_list
-    result["AIC_naive_from_latent"] = AIC_naive_from_latent_list
-    result["BIC_naive_from_latent"] = BIC_naive_from_latent_list
-    result["AUC_latent"] = AUC_latent_list
-    result["AUC_naive"] = AUC_naive_list
-    result["GT_AUC"] = GT_AUC_list
-    result["cor_latent"] = cor_latent_list
-    result["cor_naive"] = cor_naive_list
-    result["basescore_y_and_z"] = basescore_y_and_z_list
-    result["basescore_y_given_z"] = basescore_y_given_z_list
-    result["basescore_z"] = basescore_z_list
-    result["basescore_y_given_z_naive"] = basescore_y_given_z_naive_list
-    result["pc_first"] = pc_first_list
-    result["pc_second"] = pc_second_list
-    result["burn_epochs"] = burn_epochs
-    result["burn_batch_size"] = burn_batch_size
-    result["n_max_positives"] = n_max_positives
-    result["n_max_negatives"] = n_max_negatives
-    result["lr_embeddings"] = lr_embeddings
-    result["lr_epoch_10"] = lr_epoch_10
-    result["lr_beta"] = lr_beta
-    result["lr_sigma"] = lr_sigma
-    result["sigma_max"] = sigma_max
-    result["sigma_min"] = sigma_min
-    result["beta_max"] = beta_max
-    result["beta_min"] = beta_min
+    # result["model_n_dims"] = model_n_dims
+    # result["n_nodes"] = params_dataset["n_nodes"]
+    # result["n_dim"] = params_dataset["n_dim"]
+    # result["R"] = params_dataset["R"]
+    # result["sigma"] = params_dataset["sigma"]
+    # result["beta"] = params_dataset["beta"]
+    # result["DNML_codelength"] = DNML_codelength_list
+    # result["AIC_naive"] = AIC_naive_list
+    # result["BIC_naive"] = BIC_naive_list
+    # result["AIC_naive_from_latent"] = AIC_naive_from_latent_list
+    # result["BIC_naive_from_latent"] = BIC_naive_from_latent_list
+    # result["AUC_latent"] = AUC_latent_list
+    # result["AUC_naive"] = AUC_naive_list
+    # result["GT_AUC"] = GT_AUC_list
+    # result["cor_latent"] = cor_latent_list
+    # result["cor_naive"] = cor_naive_list
+    # result["basescore_y_and_z"] = basescore_y_and_z_list
+    # result["basescore_y_given_z"] = basescore_y_given_z_list
+    # result["basescore_z"] = basescore_z_list
+    # result["basescore_y_given_z_naive"] = basescore_y_given_z_naive_list
+    # result["pc_first"] = pc_first_list
+    # result["pc_second"] = pc_second_list
+    # result["burn_epochs"] = burn_epochs
+    # result["burn_batch_size"] = burn_batch_size
+    # result["n_max_positives"] = n_max_positives
+    # result["n_max_negatives"] = n_max_negatives
+    # result["lr_embeddings"] = lr_embeddings
+    # result["lr_epoch_10"] = lr_epoch_10
+    # result["lr_beta"] = lr_beta
+    # result["lr_sigma"] = lr_sigma
+    # result["sigma_max"] = sigma_max
+    # result["sigma_min"] = sigma_min
+    # result["beta_max"] = beta_max
+    # result["beta_min"] = beta_min
 
-    filepath = "result_lorentz.csv"
+    # filepath = "result_lorentz.csv"
 
-    if os.path.exists(filepath):
-        result_previous = pd.read_csv(filepath)
-        result = pd.concat([result_previous, result])
-        result.to_csv(filepath, index=False)
-    else:
-        result.to_csv(filepath, index=False)
+    # if os.path.exists(filepath):
+    #     result_previous = pd.read_csv(filepath)
+    #     result = pd.concat([result_previous, result])
+    #     result.to_csv(filepath, index=False)
+    # else:
+    #     result.to_csv(filepath, index=False)
 
     # result.to_csv("result_lorentz.csv", index=False)
