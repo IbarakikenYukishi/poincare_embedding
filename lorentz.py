@@ -737,8 +737,7 @@ def LinkPrediction(
         pin_memory=True
     )
 
-    # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
-    # 平均次数とかから逆算できる気がする。
+    # model
     model_hgg = PseudoUniform(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
@@ -777,18 +776,6 @@ def LinkPrediction(
         device=device,
         calc_latent=False
     )
-    # model_naive = WrappedNormal(
-    #     n_nodes=params_dataset['n_nodes'],
-    #     n_dim=model_n_dim,  # モデルの次元
-    #     R=params_dataset['R'],
-    #     Sigma=torch.eye(model_n_dim),
-    #     beta=1.0,
-    #     eps_1=0.00001,
-    #     init_range=0.001,
-    #     sparse=sparse,
-    #     device=device,
-    #     calc_latent=False
-    # )
 
     # 最適化関数。
     rsgd_hgg = RSGD(
@@ -822,8 +809,6 @@ def LinkPrediction(
     model_hgg.to(device)
     model_wnd.to(device)
     model_naive.to(device)
-
-    # loss_history = []
 
     start = time.time()
 
@@ -872,7 +857,6 @@ def LinkPrediction(
             rsgd_naive.step()
             losses_naive.append(loss_naive)
 
-        # loss_history.append(torch.Tensor(losses).mean().item())
         print("epoch:", epoch, ", loss_hgg:",
               torch.Tensor(losses_hgg).mean().item())
         print("epoch:", epoch, ", loss_wnd:",
@@ -895,8 +879,7 @@ def LinkPrediction(
         pin_memory=True
     )
 
-    # -2*log(p)の計算
-    # basescore_y_and_z = 0
+    # 尤度計算
     basescore_y_given_z_hgg = 0
     basescore_y_given_z_wnd = 0
     basescore_y_given_z_naive = 0
@@ -923,12 +906,6 @@ def LinkPrediction(
 
     basescore_y_and_z_hgg = basescore_y_given_z_hgg + basescore_z_hgg
     basescore_y_and_z_wnd = basescore_y_given_z_wnd + basescore_z_wnd
-
-    # AIC_naive_from_latent = basescore_y_given_z + \
-    #     (params_dataset['n_nodes'] * model_n_dim + 1)
-    # BIC_naive_from_latent = basescore_y_given_z + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
-    # np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] -
-    # 1) - np.log(2))
 
     # Non-identifiable model
     AIC_naive = basescore_y_given_z_naive + \
@@ -965,13 +942,6 @@ def LinkPrediction(
         return AUC
 
     # latentを計算したものでのAUC
-    # positive_prob = -model_hgg.calc_dist(positive_samples)
-    # negative_prob = -model_hgg.calc_dist(negative_samples)
-
-    # pred = np.append(positive_prob, negative_prob)
-    # ground_truth = np.append(np.ones(len(positive_prob)),
-    #                          np.zeros(len(negative_prob)))
-
     AUC_HGG = calc_AUC_from_prob(
         model_hgg.calc_dist(positive_samples),
         model_hgg.calc_dist(negative_samples)
@@ -986,16 +956,6 @@ def LinkPrediction(
         model_naive.calc_dist(positive_samples),
         model_naive.calc_dist(negative_samples)
     )
-
-    # # naiveでのAUC
-    # positive_prob = -model_naive.calc_dist(positive_samples)
-    # negative_prob = -model_naive.calc_dist(negative_samples)
-
-    # pred = np.append(positive_prob, negative_prob)
-    # ground_truth = np.append(np.ones(len(positive_prob)),
-    #                          np.zeros(len(negative_prob)))
-
-    # AUC_naive = metrics.roc_auc_score(ground_truth, pred)
 
     if calc_groundtruth:
 
@@ -1124,6 +1084,7 @@ def DNML_HGG(
     sigma_max,
     beta_min,
     beta_max,
+    eps_1,
     device,
     loader_workers=16,
     shuffle=True,
@@ -1140,16 +1101,27 @@ def DNML_HGG(
         pin_memory=True
     )
 
-    # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
-    # 平均次数とかから逆算できる気がする。
-    model_latent = PseudoUniform(
+    # model
+    model_hgg = PseudoUniform(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
         sigma=1.0,
-        beta=1.0,
         sigma_min=sigma_min,
         sigma_max=sigma_max,
+        beta=1.0,
+        init_range=0.001,
+        sparse=sparse,
+        device=device,
+        calc_latent=True
+    )
+    model_wnd = WrappedNormal(
+        n_nodes=params_dataset['n_nodes'],
+        n_dim=model_n_dim,  # モデルの次元
+        R=params_dataset['R'],
+        Sigma=torch.eye(model_n_dim),
+        beta=1.0,
+        eps_1=eps_1,
         init_range=0.001,
         sparse=sparse,
         device=device,
@@ -1160,23 +1132,29 @@ def DNML_HGG(
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
         sigma=1.0,
-        beta=1.0,
         sigma_min=sigma_min,
         sigma_max=sigma_max,
+        beta=1.0,
         init_range=0.001,
         sparse=sparse,
         device=device,
         calc_latent=False
     )
     # 最適化関数。
-    rsgd_latent = RSGD(
-        model_latent.parameters(),
+    rsgd_hgg = RSGD(
+        model_hgg.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
-        # lr_sigma=lr_sigma,
         R=params_dataset['R'],
-        # sigma_max=sigma_max,
-        # sigma_min=sigma_min,
+        beta_max=beta_max,
+        beta_min=beta_min,
+        device=device
+    )
+    rsgd_wnd = RSGD(
+        model_wnd.parameters(),
+        lr_embeddings=lr_embeddings,
+        lr_beta=lr_beta,
+        R=params_dataset['R'],
         beta_max=beta_max,
         beta_min=beta_min,
         device=device
@@ -1185,19 +1163,15 @@ def DNML_HGG(
         model_naive.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
-        # lr_sigma=lr_sigma,
         R=params_dataset['R'],
-        # sigma_max=sigma_max,
-        # sigma_min=sigma_min,
         beta_max=beta_max,
         beta_min=beta_min,
         device=device
     )
 
-    model_latent.to(device)
+    model_hgg.to(device)
+    model_wnd.to(device)
     model_naive.to(device)
-
-    # loss_history = []
 
     start = time.time()
 
@@ -1205,12 +1179,18 @@ def DNML_HGG(
         # if epoch != 0 and epoch % 30 == 0:  # 10 epochごとに学習率を減少
             # rsgd.param_groups[0]["lr_embeddings"] /= 5
         if epoch == 10:
-            rsgd_latent.param_groups[0]["lr_embeddings"] = lr_epoch_10
+            rsgd_hgg.param_groups[0]["lr_embeddings"] = lr_epoch_10
+            rsgd_wnd.param_groups[0]["lr_embeddings"] = lr_epoch_10
             rsgd_naive.param_groups[0]["lr_embeddings"] = lr_epoch_10
 
-        model_latent.sigma_hat()
-        losses_latent = []
+        losses_hgg = []
+        losses_wnd = []
         losses_naive = []
+
+        # MLE
+        model_hgg.params_mle()
+        model_wnd.params_mle()
+
         for pairs, labels in dataloader:
             pairs = pairs.reshape((-1, 2))
             labels = labels.reshape(-1)
@@ -1218,28 +1198,38 @@ def DNML_HGG(
             pairs = pairs.to(device)
             labels = labels.to(device)
 
-            rsgd_latent.zero_grad()
-            loss_latent = model_latent(pairs, labels).mean()
-            loss_latent.backward()
-            rsgd_latent.step()
-            losses_latent.append(loss_latent)
+            # DNML-HGG
+            rsgd_hgg.zero_grad()
+            loss_hgg = model_hgg(pairs, labels).mean()
+            loss_hgg.backward()
+            rsgd_hgg.step()
+            losses_hgg.append(loss_hgg)
 
+            # DNML-WND
+            rsgd_wnd.zero_grad()
+            loss_wnd = model_wnd(pairs, labels).mean()
+            loss_wnd.backward()
+            rsgd_wnd.step()
+            losses_wnd.append(loss_wnd)
+
+            # Naive model
             rsgd_naive.zero_grad()
             loss_naive = model_naive(pairs, labels).mean()
             loss_naive.backward()
             rsgd_naive.step()
             losses_naive.append(loss_naive)
 
-        # loss_history.append(torch.Tensor(losses).mean().item())
-        print("epoch:", epoch, ", loss_latent:",
-              torch.Tensor(losses_latent).mean().item())
-        print("loss_naive:", torch.Tensor(losses_naive).mean().item())
+        print("epoch:", epoch, ", loss_hgg:",
+              torch.Tensor(losses_hgg).mean().item())
+        print("epoch:", epoch, ", loss_wnd:",
+              torch.Tensor(losses_wnd).mean().item())
+        print("loss_naive:",
+              torch.Tensor(losses_naive).mean().item())
 
     elapsed_time = time.time() - start
     print("elapsed_time:{0}".format(elapsed_time) + "[sec]")
 
     # 尤度計算
-
     data, _ = create_dataset(
         adj_mat=adj_mat,
         n_max_positives=9999999999,
@@ -1255,63 +1245,158 @@ def DNML_HGG(
         pin_memory=True
     )
 
-    # -2*log(p)の計算
-    basescore_y_and_z = 0
-    basescore_y_given_z = 0
+    # 真のデータ数
+    n_data = params_dataset['n_nodes'] * (params_dataset['n_nodes'] - 1)
+
+    # # -2*log(p)の計算
+    # basescore_y_and_z = 0
+    # basescore_y_given_z = 0
+    # basescore_y_given_z_naive = 0
+    # for pairs, labels in dataloader_all:
+    #     pairs = pairs.to(device)
+    #     labels = labels.to(device)
+
+    #     basescore_y_and_z += model_latent(pairs, labels).sum().item()
+    #     basescore_y_given_z += model_latent.lik_y_given_z(
+    #         pairs, labels).sum().item()
+    #     basescore_y_given_z_naive += model_naive.lik_y_given_z(
+    #         pairs, labels).sum().item()
+
+    # basescore_z = model_latent.z()
+
+    # AIC_naive = basescore_y_given_z_naive + \
+    #     (params_dataset['n_nodes'] * model_n_dim + 1)
+    # BIC_naive = basescore_y_given_z_naive + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
+    # np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] -
+    # 1) - np.log(2))
+
+    # AIC_naive_from_latent = basescore_y_given_z + \
+    #     (params_dataset['n_nodes'] * model_n_dim + 1)
+    # BIC_naive_from_latent = basescore_y_given_z + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
+    # np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] -
+    # 1) - np.log(2))
+
+    # pc_first, pc_second = model_latent.get_PC(
+    #     sigma_max, sigma_min, beta_max, beta_min)
+    # DNML_codelength = basescore_y_and_z + pc_first + pc_second
+
+    # 尤度計算
+    basescore_y_given_z_hgg = 0
+    basescore_y_given_z_wnd = 0
     basescore_y_given_z_naive = 0
     for pairs, labels in dataloader_all:
         pairs = pairs.to(device)
         labels = labels.to(device)
 
-        basescore_y_and_z += model_latent(pairs, labels).sum().item()
-        basescore_y_given_z += model_latent.lik_y_given_z(
+        basescore_y_given_z_hgg += model_hgg.lik_y_given_z(
+            pairs, labels).sum().item()
+        basescore_y_given_z_wnd += model_wnd.lik_y_given_z(
             pairs, labels).sum().item()
         basescore_y_given_z_naive += model_naive.lik_y_given_z(
             pairs, labels).sum().item()
 
-    basescore_z = model_latent.z()
+    basescore_z_hgg = model_hgg.z()
+    basescore_z_wnd = model_wnd.z()
 
+    # データを全部打ち込む場合はいらない
+    # basescore_y_given_z_hgg = basescore_y_given_z_hgg * \
+    #     (n_data / len(lik_data)) / 2
+    # basescore_y_given_z_wnd = basescore_y_given_z_wnd * \
+    #     (n_data / len(lik_data)) / 2
+    # basescore_y_given_z_naive = basescore_y_given_z_naive * \
+    #     (n_data / len(lik_data)) / 2
+
+    basescore_y_and_z_hgg = basescore_y_given_z_hgg + basescore_z_hgg
+    basescore_y_and_z_wnd = basescore_y_given_z_wnd + basescore_z_wnd
+
+    # Non-identifiable model
     AIC_naive = basescore_y_given_z_naive + \
         (params_dataset['n_nodes'] * model_n_dim + 1)
     BIC_naive = basescore_y_given_z_naive + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
         np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
 
-    AIC_naive_from_latent = basescore_y_given_z + \
-        (params_dataset['n_nodes'] * model_n_dim + 1)
-    BIC_naive_from_latent = basescore_y_given_z + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
-        np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
+    # DNML-HGG
+    pc_first, pc_second = model_hgg.get_PC(
+        sigma_max, sigma_min, beta_max, beta_min, sampling=True)
+    DNML_HGG = basescore_y_and_z_hgg + pc_first + pc_second
 
-    pc_first, pc_second = model_latent.get_PC(
-        sigma_max, sigma_min, beta_max, beta_min)
-    DNML_codelength = basescore_y_and_z + pc_first + pc_second
+    AIC_HGG = basescore_y_and_z_hgg + 2
+    BIC_HGG = basescore_y_and_z_hgg + 0.5 * (np.log(params_dataset['n_nodes']) + np.log(
+        params_dataset['n_nodes'] - 1) - np.log(2)) + 0.5 * np.log(params_dataset['n_nodes'])
 
-    print("p(y, z; theta):", basescore_y_and_z)
-    print("p(y|z; theta):", basescore_y_given_z)
-    print("p(z; theta):", basescore_z)
-    print("p(y; z, theta):", basescore_y_given_z_naive)
-    print("DNML:", DNML_codelength)
+    # DNML-WND
+    pc_wnd = model_wnd.get_PC()
+    DNML_WND = basescore_y_and_z_wnd + pc_wnd
+    AIC_WND = basescore_y_and_z_wnd + model_n_dim * (model_n_dim + 1) / 2 + 1
+    BIC_WND = basescore_y_and_z_wnd + 0.5 * (np.log(params_dataset['n_nodes']) + np.log(
+        params_dataset['n_nodes'] - 1) - np.log(2)) + (model_n_dim * (model_n_dim + 1) / 4) * np.log(params_dataset['n_nodes'])
+
+    print("-log p_HGG(y, z):", basescore_y_and_z_hgg)
+    print("-log p_WND(y, z):", basescore_y_and_z_wnd)
+    print("-log p_HGG(y|z):", basescore_y_given_z_hgg)
+    print("-log p_WND(y|z):", basescore_y_given_z_wnd)
+    print("-log p_HGG(z):", basescore_z_hgg)
+    print("-log p_WND(z):", basescore_z_wnd)
+    print("-log p_naive(y; z):", basescore_y_given_z_naive)
+    print("DNML-HGG:", DNML_HGG)
+    print("DNML-WND:", DNML_WND)
+    print("AIC_HGG:", AIC_HGG)
+    print("BIC_HGG:", BIC_HGG)
+    print("AIC_WND:", AIC_WND)
+    print("BIC_WND:", BIC_WND)
     print("AIC_naive:", AIC_naive)
     print("BIC_naive:", BIC_naive)
-    print("AIC_naive_from_latent:", AIC_naive_from_latent)
-    print("BIC_naive_from_latent:", BIC_naive_from_latent)
-    # print("AUC_latent:", AUC_latent)
-    # print("AUC_naive:", AUC_naive)
 
     ret = {
-        "basescore_y_and_z": basescore_y_and_z,
-        "basescore_y_given_z": basescore_y_given_z,
-        "basescore_z": basescore_z,
-        "basescore_y_given_z_naive": basescore_y_given_z_naive,
-        "DNML_codelength": DNML_codelength,
-        "pc_first": pc_first,
-        "pc_second": pc_second,
+        "DNML_HGG": DNML_HGG,
+        "AIC_HGG": AIC_HGG,
+        "BIC_HGG": BIC_HGG,
+        "DNML_WND": DNML_WND,
+        "AIC_WND": AIC_WND,
+        "BIC_WND": BIC_WND,
         "AIC_naive": AIC_naive,
         "BIC_naive": BIC_naive,
-        "AIC_naive_from_latent": AIC_naive_from_latent,
-        "BIC_naive_from_latent": BIC_naive_from_latent,
-        "model_latent": model_latent,
+        "-log p_HGG(y, z)": basescore_y_and_z_hgg,
+        "-log p_HGG(y|z)": basescore_y_given_z_hgg,
+        "-log p_HGG(z)": basescore_z_hgg,
+        "-log p_WND(y, z)": basescore_y_and_z_wnd,
+        "-log p_WND(y|z)": basescore_y_given_z_wnd,
+        "-log p_WND(z)": basescore_z_wnd,
+        "-log p_naive(y; z)": basescore_y_given_z_naive,
+        "pc_first": pc_first,
+        "pc_second": pc_second,
+        "model_hgg": model_hgg,
+        "model_wnd": model_wnd,
         "model_naive": model_naive
     }
+
+    # print("p(y, z; theta):", basescore_y_and_z)
+    # print("p(y|z; theta):", basescore_y_given_z)
+    # print("p(z; theta):", basescore_z)
+    # print("p(y; z, theta):", basescore_y_given_z_naive)
+    # print("DNML:", DNML_codelength)
+    # print("AIC_naive:", AIC_naive)
+    # print("BIC_naive:", BIC_naive)
+    # print("AIC_naive_from_latent:", AIC_naive_from_latent)
+    # print("BIC_naive_from_latent:", BIC_naive_from_latent)
+    # # print("AUC_latent:", AUC_latent)
+    # # print("AUC_naive:", AUC_naive)
+
+    # ret = {
+    #     "basescore_y_and_z": basescore_y_and_z,
+    #     "basescore_y_given_z": basescore_y_given_z,
+    #     "basescore_z": basescore_z,
+    #     "basescore_y_given_z_naive": basescore_y_given_z_naive,
+    #     "DNML_codelength": DNML_codelength,
+    #     "pc_first": pc_first,
+    #     "pc_second": pc_second,
+    #     "AIC_naive": AIC_naive,
+    #     "BIC_naive": BIC_naive,
+    #     "AIC_naive_from_latent": AIC_naive_from_latent,
+    #     "BIC_naive_from_latent": BIC_naive_from_latent,
+    #     "model_latent": model_latent,
+    #     "model_naive": model_naive
+    # }
 
     return ret
 
@@ -1346,12 +1431,11 @@ if __name__ == '__main__':
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     lr_beta = 0.001
-    # lr_sigma = 0.001
     sigma_max = 10.0
     sigma_min = 0.1
     beta_min = 0.1
     beta_max = 10.0
-    eps_1 = 0.000001
+    eps_1 = 1e-6
     # それ以外
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -1373,29 +1457,9 @@ if __name__ == '__main__':
     print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
     result = pd.DataFrame()
-    basescore_y_and_z_list = []
-    basescore_y_given_z_list = []
-    basescore_z_list = []
-    basescore_y_given_z_naive_list = []
-    DNML_codelength_list = []
-    pc_first_list = []
-    pc_second_list = []
-    AIC_naive_list = []
-    BIC_naive_list = []
-    AIC_naive_from_latent_list = []
-    BIC_naive_from_latent_list = []
-    CV_score_list = []
-    AUC_latent_list = []
-    AUC_naive_list = []
-    GT_AUC_list = []
-    cor_latent_list = []
-    cor_naive_list = []
 
     model_n_dims = [4, 8, 16, 32, 64]
     # model_n_dims = [16, 32, 64]
-
-    # model_n_dims = [64]
-
     # model_n_dims = [64]
 
     positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
@@ -1406,7 +1470,6 @@ if __name__ == '__main__':
     # negative samplingの比率を平均次数から決定
     pos_train_graph = len(np.where(train_graph == 1)[0])
     neg_train_graph = len(np.where(train_graph == 0)[0])
-    # print(pos_train_graph)
     ratio = neg_train_graph / pos_train_graph
     print("ratio:", ratio)
 
@@ -1420,38 +1483,6 @@ if __name__ == '__main__':
         32 / 100  # batchサイズに対応して学習率変更
 
     for model_n_dim in model_n_dims:
-        # basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength, pc_first, pc_second, AIC_naive, BIC_naive = DNML_HGG(
-        #     adj_mat=adj_mat,
-        #     params_dataset=params_dataset,
-        #     model_n_dim=model_n_dim,
-        #     burn_epochs=burn_epochs,
-        #     burn_batch_size=burn_batch_size,
-        #     n_max_positives=n_max_positives,
-        #     n_max_negatives=n_max_negatives,
-        #     lr_embeddings=lr_embeddings,
-        #     lr_beta=lr_beta,
-        #     lr_sigma=lr_sigma,
-        #     sigma_min=sigma_min,
-        #     sigma_max=sigma_max,
-        #     beta_min=beta_min,
-        #     beta_max=beta_max,
-        #     device=device,
-        #     loader_workers=16,
-        #     shuffle=True,
-        #     sparse=False
-        # )
-        # basescore_y_and_z_list.append(basescore_y_and_z)
-        # basescore_y_given_z_list.append(basescore_y_given_z)
-        # basescore_z_list.append(basescore_z)
-        # DNML_codelength_list.append(DNML_codelength)
-        # pc_first_list.append(pc_first)
-        # pc_second_list.append(pc_second)
-        # AIC_naive_list.append(AIC_naive)
-        # BIC_naive_list.append(BIC_naive)
-
-        # basescore_y_and_z, basescore_y_given_z, basescore_z, DNML_codelength,
-        # pc_first, pc_second, AIC_naive, BIC_naive, AUC, GT_AUC, correlation,
-        # model = LinkPrediction(
         ret = LinkPrediction(
             adj_mat=adj_mat,
             train_graph=train_graph,
@@ -1479,23 +1510,6 @@ if __name__ == '__main__':
             sparse=False,
             calc_groundtruth=True
         )
-
-        # basescore_y_and_z_list.append(ret["basescore_y_and_z"])
-        # basescore_y_given_z_list.append(ret["basescore_y_given_z"])
-        # basescore_z_list.append(ret["basescore_z"])
-        # basescore_y_given_z_naive_list.append(ret["basescore_y_given_z_naive"])
-        # DNML_codelength_list.append(ret["DNML_codelength"])
-        # pc_first_list.append(ret["pc_first"])
-        # pc_second_list.append(ret["pc_second"])
-        # AIC_naive_list.append(ret["AIC_naive"])
-        # BIC_naive_list.append(ret["BIC_naive"])
-        # AIC_naive_from_latent_list.append(ret["AIC_naive_from_latent"])
-        # BIC_naive_from_latent_list.append(ret["BIC_naive_from_latent"])
-        # AUC_latent_list.append(ret["AUC_latent"])
-        # AUC_naive_list.append(ret["AUC_naive"])
-        # GT_AUC_list.append(ret["GT_AUC"])
-        # cor_latent_list.append(ret["cor_latent"])
-        # cor_naive_list.append(ret["cor_naive"])
 
         torch.save(ret["model_hgg"].state_dict(),
                    "temp/result_" + str(model_n_dim) + "_hgg.pth")
@@ -1526,8 +1540,6 @@ if __name__ == '__main__':
         ret["beta_max"] = beta_max
         ret["beta_min"] = beta_min
         ret["eps_1"] = eps_1
-
-        print(ret)
 
         row = pd.DataFrame(ret.values(), index=ret.keys()).T
 
@@ -1584,70 +1596,3 @@ if __name__ == '__main__':
             result.to_csv(filepath, index=False)
         else:
             row.to_csv(filepath, index=False)
-
-        # CV_score = CV_HGG(
-        #     adj_mat=adj_mat,
-        #     params_dataset=params_dataset,
-        #     model_n_dim=model_n_dim,
-        #     burn_epochs=burn_epochs,
-        #     burn_batch_size=burn_batch_size,
-        #     n_max_positives=n_max_positives,
-        #     n_max_negatives=n_max_negatives,
-        #     learning_rate=learning_rate,
-        #     sigma_min=sigma_min,
-        #     sigma_max=sigma_max,
-        #     beta_min=beta_min,
-        #     beta_max=beta_max,
-        #     device=device,
-        #     k_folds=5,
-        #     loader_workers=16,
-        #     shuffle=True,
-        #     sparse=False
-        # )
-        # CV_score_list.append(CV_score)
-
-    # result["model_n_dims"] = model_n_dims
-    # result["n_nodes"] = params_dataset["n_nodes"]
-    # result["n_dim"] = params_dataset["n_dim"]
-    # result["R"] = params_dataset["R"]
-    # result["sigma"] = params_dataset["sigma"]
-    # result["beta"] = params_dataset["beta"]
-    # result["DNML_codelength"] = DNML_codelength_list
-    # result["AIC_naive"] = AIC_naive_list
-    # result["BIC_naive"] = BIC_naive_list
-    # result["AIC_naive_from_latent"] = AIC_naive_from_latent_list
-    # result["BIC_naive_from_latent"] = BIC_naive_from_latent_list
-    # result["AUC_latent"] = AUC_latent_list
-    # result["AUC_naive"] = AUC_naive_list
-    # result["GT_AUC"] = GT_AUC_list
-    # result["cor_latent"] = cor_latent_list
-    # result["cor_naive"] = cor_naive_list
-    # result["basescore_y_and_z"] = basescore_y_and_z_list
-    # result["basescore_y_given_z"] = basescore_y_given_z_list
-    # result["basescore_z"] = basescore_z_list
-    # result["basescore_y_given_z_naive"] = basescore_y_given_z_naive_list
-    # result["pc_first"] = pc_first_list
-    # result["pc_second"] = pc_second_list
-    # result["burn_epochs"] = burn_epochs
-    # result["burn_batch_size"] = burn_batch_size
-    # result["n_max_positives"] = n_max_positives
-    # result["n_max_negatives"] = n_max_negatives
-    # result["lr_embeddings"] = lr_embeddings
-    # result["lr_epoch_10"] = lr_epoch_10
-    # result["lr_beta"] = lr_beta
-    # result["lr_sigma"] = lr_sigma
-    # result["sigma_max"] = sigma_max
-    # result["sigma_min"] = sigma_min
-    # result["beta_max"] = beta_max
-    # result["beta_min"] = beta_min
-
-    # filepath = "result_lorentz.csv"
-
-    # if os.path.exists(filepath):
-    #     result_previous = pd.read_csv(filepath)
-    #     result = pd.concat([result_previous, result])
-    #     result.to_csv(filepath, index=False)
-    # else:
-    #     result.to_csv(filepath, index=False)
-
-    # result.to_csv("result_lorentz.csv", index=False)
