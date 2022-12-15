@@ -64,7 +64,7 @@ def multigamma_ln(a, d):
     return special.multigammaln(a, d)
 
 
-class RSGD(optim.Optimizer):
+class RSGD_HGG(optim.Optimizer):
     """
     Riemaniann Stochastic Gradient Descentを行う関数。
     """
@@ -74,10 +74,7 @@ class RSGD(optim.Optimizer):
         params,
         lr_embeddings,
         lr_beta,
-        # lr_sigma,
         R,
-        # sigma_max,
-        # sigma_min,
         beta_max,
         beta_min,
         device
@@ -148,6 +145,97 @@ class RSGD(optim.Optimizer):
                 p.data.copy_(update)
 
 
+class RSGD_WND(optim.Optimizer):
+    """
+    Riemaniann Stochastic Gradient Descentを行う関数。
+    """
+
+    def __init__(
+        self,
+        params,
+        lr_embeddings,
+        lr_beta,
+        lr_gamma,
+        R,
+        beta_max,
+        beta_min,
+        gamma_max,
+        gamma_min,
+        device
+    ):
+        defaults = {
+            "lr_embeddings": lr_embeddings,
+            "lr_beta": lr_beta,
+            "lr_gamma": lr_gamma,
+            'R': R,
+            "beta_max": beta_max,
+            "beta_min": beta_min,
+            "gamma_max": gamma_max,
+            "gamma_min": gamma_min,
+            "device": device
+        }
+        super().__init__(params, defaults=defaults)
+
+    def step(self):
+        for group in self.param_groups:
+
+            # betaとsigmaの更新
+            beta = group["params"][0]
+            gamma = group["params"][1]
+
+            beta_update = beta.data - \
+                group["lr_beta"] * beta.grad.data
+            beta_update = max(beta_update, group["beta_min"])
+            beta_update = min(beta_update, group["beta_max"])
+            if not math.isnan(beta_update):
+                beta.data.copy_(torch.tensor(beta_update))
+
+            gamma_update = gamma.data - \
+                group["lr_gamma"] * gamma.grad.data
+            gamma_update = max(gamma_update, group["gamma_min"])
+            gamma_update = min(gamma_update, group["gamma_max"])
+            if not math.isnan(gamma_update):
+                gamma.data.copy_(torch.tensor(gamma_update))
+
+            # sigma_update = sigma.data - \
+            #     group["lr_sigma"] * sigma.grad.data
+            # sigma_update = max(sigma_update, group["sigma_min"])
+            # sigma_update = min(sigma_update, group["sigma_max"])
+            # if not math.isnan(sigma_update):
+            #     sigma.data.copy_(torch.tensor(sigma_update))
+            # print(group["params"])
+
+            # うめこみの更新
+            for p in group["params"][2:]:
+                # print("p.grad:", p.grad)
+                if p.grad is None:
+                    continue
+                B, D = p.size()
+                gl = torch.eye(D, device=p.device, dtype=p.dtype)
+                gl[0, 0] = -1
+                grad_norm = torch.norm(p.grad.data)
+                grad_norm = torch.where(
+                    grad_norm > 1, grad_norm, torch.tensor(1.0, device=p.device))
+                # only normalize if global grad_norm is more than 1
+                h = (p.grad.data / grad_norm) @ gl
+                proj = (
+                    h
+                    + (
+                        lorentz_scalar_product(p, h)
+                    ).unsqueeze(1)
+                    * p
+                )
+                update = exp_map(p, -group["lr_embeddings"] * proj)
+                is_nan_inf = torch.isnan(update) | torch.isinf(update)
+                update = torch.where(is_nan_inf, p, update)
+                # We've found that the performance sometimes deteriorates when we optimize z over the sphere radius R
+                # Thus, we optimize embeddings in radius R*0.9
+                # update = set_dim0(update, group["R"] * 0.90)
+                update = set_dim0(update, group["R"] * 1.00)
+
+                p.data.copy_(update)
+
+
 class Lorentz(nn.Module):
 
     def __init__(
@@ -155,7 +243,7 @@ class Lorentz(nn.Module):
         n_nodes,
         n_dim,  # 次元より1つ多くデータを取る必要があることに注意
         R,
-        beta,
+        # beta,
         init_range=0.01,
         sparse=True,
         device="cpu",
@@ -164,17 +252,17 @@ class Lorentz(nn.Module):
         super().__init__()
         self.n_nodes = n_nodes
         self.n_dim = n_dim
-        self.beta = nn.Parameter(torch.tensor(beta))
+        # self.beta = nn.Parameter(torch.tensor(beta))
         self.R = R
-        self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
+        # self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
         self.device = device
         self.calc_latent = calc_latent
 
-        nn.init.normal(self.table.weight, 0, init_range)
+        # nn.init.normal(self.table.weight, 0, init_range)
 
         # 0次元目をセット
-        with torch.no_grad():
-            set_dim0(self.table.weight, self.R)
+        # with torch.no_grad():
+        #     set_dim0(self.table.weight, self.R)
 
     def latent_lik(
         self,
@@ -215,24 +303,25 @@ class Lorentz(nn.Module):
         pairs,
         labels
     ):
-        # 座標を取得
-        us = self.table(pairs[:, 0])
-        vs = self.table(pairs[:, 1])
+        # # 座標を取得
+        # us = self.table(pairs[:, 0])
+        # vs = self.table(pairs[:, 1])
 
-        # ロス計算
-        dist = h_dist(us, vs)
-        loss = torch.clone(labels).float()
-        # 数値計算の問題をlogaddexpで回避
-        # zを固定した下でのyのロス
-        loss = torch.where(
-            loss == 1,
-            torch.logaddexp(torch.tensor([0.0]).to(
-                self.device), self.beta * (dist - self.R)),
-            torch.logaddexp(torch.tensor([0.0]).to(
-                self.device), -self.beta * (dist - self.R))
-        )
+        # # ロス計算
+        # dist = h_dist(us, vs)
+        # loss = torch.clone(labels).float()
+        # # 数値計算の問題をlogaddexpで回避
+        # # zを固定した下でのyのロス
+        # loss = torch.where(
+        #     loss == 1,
+        #     torch.logaddexp(torch.tensor([0.0]).to(
+        #         self.device), self.beta * (dist - self.R)),
+        #     torch.logaddexp(torch.tensor([0.0]).to(
+        #         self.device), -self.beta * (dist - self.R))
+        # )
 
-        return loss
+        # return loss
+        pass
 
     def z(
         self
@@ -284,10 +373,6 @@ class Lorentz(nn.Module):
 
     def get_PC(
         self,
-        sigma_max,
-        sigma_min,
-        beta_max,
-        beta_min,
         sampling=True
     ):
         pass
@@ -313,12 +398,14 @@ class PseudoUniform(Lorentz):
             n_nodes=n_nodes,
             n_dim=n_dim,  # 次元より1つ多くデータを取る必要があることに注意
             R=R,
-            beta=beta,
+            # beta=beta,
             init_range=init_range,
             sparse=sparse,
             device=device,
             calc_latent=calc_latent
         )
+        self.beta = nn.Parameter(torch.tensor(beta))
+
         self.sigma = sigma
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
@@ -328,7 +415,7 @@ class PseudoUniform(Lorentz):
             numerator = lambda theta: np.sin(theta)**(self.n_dim - 1 - j)
             self.I_D[j] = integrate.quad(numerator, 0, np.pi)[0]
 
-        print("分母:", self.I_D)
+        # print("分母:", self.I_D)
 
         self.avg_codelength = torch.zeros(self.n_dim - 1)
 
@@ -337,14 +424,39 @@ class PseudoUniform(Lorentz):
                 (self.n_dim - 1 - j) * np.log(np.sin(theta)) - np.log(self.I_D[j].numpy()))
             self.avg_codelength[j] = integrate.quad(numerator, 0, np.pi)[0]
 
-        print("平均符号長:", self.avg_codelength)
+        # print("平均符号長:", self.avg_codelength)
 
+        self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
         # nn.init.uniform_(self.table.weight, -init_range, init_range)
         nn.init.normal(self.table.weight, 0, init_range)
 
         # 0次元目をセット
         with torch.no_grad():
             set_dim0(self.table.weight, self.R)
+
+    def lik_y_given_z(
+        self,
+        pairs,
+        labels
+    ):
+        # 座標を取得
+        us = self.table(pairs[:, 0])
+        vs = self.table(pairs[:, 1])
+
+        # ロス計算
+        dist = h_dist(us, vs)
+        loss = torch.clone(labels).float()
+        # 数値計算の問題をlogaddexpで回避
+        # zを固定した下でのyのロス
+        loss = torch.where(
+            loss == 1,
+            torch.logaddexp(torch.tensor([0.0]).to(
+                self.device), self.beta * (dist - self.R)),
+            torch.logaddexp(torch.tensor([0.0]).to(
+                self.device), -self.beta * (dist - self.R))
+        )
+
+        return loss
 
     def params_mle(
         self
@@ -427,25 +539,27 @@ class PseudoUniform(Lorentz):
         beta_min,
         sampling=True
     ):
+
         if sampling == False:
             # DNMLのPCの計算
-            x_e = self.get_poincare_table()
+            x_e = self.get_lorentz_table()
         else:
             idx = np.array(range(self.n_nodes))
             idx = np.random.permutation(idx)[:int(self.n_nodes * 0.1)]
-            x_e = self.get_poincare_table()[idx, :]
+            x_e = self.get_lorentz_table()[idx, :]
 
         n_nodes_sample = len(x_e)
         print(n_nodes_sample)
 
-        norm_x_e_2 = np.sum(x_e**2, axis=1).reshape((-1, 1))
-        denominator_mat = (1 - norm_x_e_2) * (1 - norm_x_e_2.T)
-        numerator_mat = norm_x_e_2 + norm_x_e_2.T
-        numerator_mat -= 2 * x_e.dot(x_e.T)
-        # arccoshのエラー対策
+        # lorentz scalar product
+        first_term = - x_e[:, :1] * x_e[:, :1].T
+        remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
+        adj_mat = - (first_term + remaining)
+
         for i in range(n_nodes_sample):
-            numerator_mat[i, i] = 0
-        dist_mat = np.arccosh(1 + 2 * numerator_mat / denominator_mat)
+            adj_mat[i, i] = 1
+        # distance matrix
+        dist_mat = np.arccosh(adj_mat)
 
         is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
         dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
@@ -492,6 +606,7 @@ class WrappedNormal(Lorentz):
         R,
         Sigma,
         beta,
+        gamma,
         eps_1,
         init_range=0.01,
         sparse=True,
@@ -502,21 +617,25 @@ class WrappedNormal(Lorentz):
             n_nodes=n_nodes,
             n_dim=n_dim,  # 次元より1つ多くデータを取る必要があることに注意
             R=R,
-            beta=beta,
+            # beta=beta,
             init_range=init_range,
             sparse=sparse,
             device=device,
             calc_latent=calc_latent
         )
+        self.beta = nn.Parameter(torch.tensor(beta))
+        self.gamma = nn.Parameter(torch.tensor(gamma))
         self.Sigma = Sigma
         self.Sigma = self.Sigma.to(self.device)
         self.eps_1 = eps_1
 
-        # nn.init.normal(self.table.weight, 0, init_range)
+        self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
+        # nn.init.uniform_(self.table.weight, -init_range, init_range)
+        nn.init.normal(self.table.weight, 0, init_range)
 
-        # # 0次元目をセット
-        # with torch.no_grad():
-        #     set_dim0(self.table.weight, self.R)
+        # 0次元目をセット
+        with torch.no_grad():
+            set_dim0(self.table.weight, self.R)
 
     def params_mle(
         self
@@ -530,6 +649,8 @@ class WrappedNormal(Lorentz):
 
         self.Sigma = torch.mm(v.T / self.n_nodes, v)
         print(self.Sigma)
+        print("beta:", self.beta)
+        print("gamma:", self.gamma)
 
     def latent_lik(
         self,
@@ -559,16 +680,94 @@ class WrappedNormal(Lorentz):
 
         return lik
 
-    def get_PC(
-        self
+    def lik_y_given_z(
+        self,
+        pairs,
+        labels
     ):
-        ret = 0
-        ret += self.n_dim * np.log(2 / (self.n_dim - 1))
-        ret += (1 - self.n_dim) * self.n_dim * np.log(self.eps_1) / 2
-        ret += (self.n_nodes * self.n_dim / 2) * np.log(self.n_nodes /
-                                                        (2 * np.e)) - multigamma_ln(self.n_dim / 2, self.n_dim)
+        # 座標を取得
+        us = self.table(pairs[:, 0])
+        vs = self.table(pairs[:, 1])
 
-        return ret
+        # ロス計算
+        dist = h_dist(us, vs)
+        loss = torch.clone(labels).float()
+        # 数値計算の問題をlogaddexpで回避
+        # zを固定した下でのyのロス
+        loss = torch.where(
+            loss == 1,
+            torch.logaddexp(torch.tensor([0.0]).to(
+                self.device), self.beta * dist - self.gamma),
+            torch.logaddexp(torch.tensor([0.0]).to(
+                self.device), -self.beta * dist + self.gamma)
+        )
+
+        return loss
+
+    def get_PC(
+        self,
+        beta_min,
+        beta_max,
+        gamma_min,
+        gamma_max,
+        sampling
+    ):
+        if sampling == False:
+            # DNMLのPCの計算
+            x_e = self.get_lorentz_table()
+        else:
+            idx = np.array(range(self.n_nodes))
+            idx = np.random.permutation(idx)[:int(self.n_nodes * 0.1)]
+            x_e = self.get_lorentz_table()[idx, :]
+
+        n_nodes_sample = len(x_e)
+        print(n_nodes_sample)
+
+        # lorentz scalar product
+        first_term = - x_e[:, :1] * x_e[:, :1].T
+        remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
+        adj_mat = - (first_term + remaining)
+
+        for i in range(n_nodes_sample):
+            adj_mat[i, i] = 1
+        # distance matrix
+        dist_mat = np.arccosh(adj_mat)
+
+        is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
+        dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
+        X = dist_mat
+        # dist_mat
+        # X = self.R - dist_mat
+        for i in range(n_nodes_sample):
+            X[i, i] = 0
+
+        # I_n
+        def sqrt_I_n(
+            beta,
+            gamma
+        ):
+            I_1_1 = np.sum(X**2 / ((np.cosh((beta * X - gamma) / 2.0) * 2)
+                                   ** 2)) / (n_nodes_sample * (n_nodes_sample - 1))
+            I_1_2 = np.sum(- X / ((np.cosh((beta * X - gamma) / 2.0) * 2)
+                                  ** 2)) / (n_nodes_sample * (n_nodes_sample - 1))
+            I_2_2 = 1 / ((np.cosh((beta * X - gamma) / 2.0) * 2)**2)
+            for i in range(n_nodes_sample):
+                I_2_2[i, i] = 0
+            I_2_2 = np.sum(I_2_2) / (n_nodes_sample * (n_nodes_sample - 1))
+
+            return np.sqrt(np.abs(I_1_1 * I_2_2 - I_1_2 * I_1_2))
+
+        ret_1 = 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
+            np.log(integrate.dblquad(sqrt_I_n, gamma_min,
+                                     gamma_max, beta_min, beta_max)[0])
+
+        ret_2 = 0
+        ret_2 += self.n_dim * np.log(2 / (self.n_dim - 1))
+        ret_2 += (1 - self.n_dim) * self.n_dim * np.log(self.eps_1) / 2
+        ret_2 += (self.n_nodes * self.n_dim / 2) * np.log(self.n_nodes /
+                                                          (2 * np.e)) - multigamma_ln(self.n_dim / 2, self.n_dim)
+
+        return ret_1, ret_2
 
 
 def CV_HGG(
@@ -710,10 +909,13 @@ def LinkPrediction(
     lr_embeddings,
     lr_epoch_10,
     lr_beta,
+    lr_gamma,
     sigma_min,
     sigma_max,
     beta_min,
     beta_max,
+    gamma_min,
+    gamma_max,
     eps_1,
     device,
     loader_workers=16,
@@ -757,6 +959,7 @@ def LinkPrediction(
         R=params_dataset['R'],
         Sigma=torch.eye(model_n_dim),
         beta=1.0,
+        gamma=params_dataset['R'],
         eps_1=eps_1,
         init_range=0.001,
         sparse=sparse,
@@ -778,7 +981,7 @@ def LinkPrediction(
     )
 
     # 最適化関数。
-    rsgd_hgg = RSGD(
+    rsgd_hgg = RSGD_HGG(
         model_hgg.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
@@ -787,16 +990,19 @@ def LinkPrediction(
         beta_min=beta_min,
         device=device
     )
-    rsgd_wnd = RSGD(
+    rsgd_wnd = RSGD_WND(
         model_wnd.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
+        lr_gamma=lr_gamma,
         R=params_dataset['R'],
         beta_max=beta_max,
         beta_min=beta_min,
+        gamma_min=gamma_min,
+        gamma_max=gamma_max,
         device=device
     )
-    rsgd_naive = RSGD(
+    rsgd_naive = RSGD_HGG(
         model_naive.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
@@ -914,17 +1120,23 @@ def LinkPrediction(
         np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
 
     # DNML-HGG
-    pc_first, pc_second = model_hgg.get_PC(
+    pc_hgg_first, pc_hgg_second = model_hgg.get_PC(
         sigma_max, sigma_min, beta_max, beta_min, sampling=True)
-    DNML_HGG = basescore_y_and_z_hgg + pc_first + pc_second
+    DNML_HGG = basescore_y_and_z_hgg + pc_hgg_first + pc_hgg_second
 
     AIC_HGG = basescore_y_and_z_hgg + 2
     BIC_HGG = basescore_y_and_z_hgg + 0.5 * (np.log(params_dataset['n_nodes']) + np.log(
         params_dataset['n_nodes'] - 1) - np.log(2)) + 0.5 * np.log(params_dataset['n_nodes'])
 
     # DNML-WND
-    pc_wnd = model_wnd.get_PC()
-    DNML_WND = basescore_y_and_z_wnd + pc_wnd
+    pc_wnd_first, pc_wnd_second = model_wnd.get_PC(
+        beta_min,
+        beta_max,
+        gamma_min,
+        gamma_max,
+        sampling=True
+    )
+    DNML_WND = basescore_y_and_z_wnd + pc_wnd_first + pc_wnd_second
     AIC_WND = basescore_y_and_z_wnd + model_n_dim * (model_n_dim + 1) / 2 + 1
     BIC_WND = basescore_y_and_z_wnd + 0.5 * (np.log(params_dataset['n_nodes']) + np.log(
         params_dataset['n_nodes'] - 1) - np.log(2)) + (model_n_dim * (model_n_dim + 1) / 4) * np.log(params_dataset['n_nodes'])
@@ -1059,8 +1271,10 @@ def LinkPrediction(
         "-log p_WND(y|z)": basescore_y_given_z_wnd,
         "-log p_WND(z)": basescore_z_wnd,
         "-log p_naive(y; z)": basescore_y_given_z_naive,
-        "pc_first": pc_first,
-        "pc_second": pc_second,
+        "pc_hgg_first": pc_hgg_first,
+        "pc_hgg_second": pc_hgg_second,
+        "pc_wnd_first": pc_wnd_first,
+        "pc_wnd_second": pc_wnd_second,
         "model_hgg": model_hgg,
         "model_wnd": model_wnd,
         "model_naive": model_naive
@@ -1431,10 +1645,13 @@ if __name__ == '__main__':
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     lr_beta = 0.001
+    lr_gamma = 0.001
     sigma_max = 10.0
     sigma_min = 0.1
     beta_min = 0.1
     beta_max = 10.0
+    gamma_min = 0.1
+    gamma_max = 10.0
     eps_1 = 1e-6
     # それ以外
     loader_workers = 16
@@ -1499,10 +1716,13 @@ if __name__ == '__main__':
             lr_embeddings=lr_embeddings,
             lr_epoch_10=lr_epoch_10,
             lr_beta=lr_beta,
+            lr_gamma=lr_gamma,
             sigma_min=sigma_min,
             sigma_max=sigma_max,
             beta_min=beta_min,
             beta_max=beta_max,
+            gamma_min=gamma_min,
+            gamma_max=gamma_max,
             eps_1=eps_1,
             device=device,
             loader_workers=16,
@@ -1535,10 +1755,13 @@ if __name__ == '__main__':
         ret["lr_embeddings"] = lr_embeddings
         ret["lr_epoch_10"] = lr_epoch_10
         ret["lr_beta"] = lr_beta
+        ret["lr_gamma"] = lr_gamma
         ret["sigma_max"] = sigma_max
         ret["sigma_min"] = sigma_min
         ret["beta_max"] = beta_max
         ret["beta_min"] = beta_min
+        ret["gamma_max"] = gamma_max
+        ret["gamma_min"] = gamma_min
         ret["eps_1"] = eps_1
 
         row = pd.DataFrame(ret.values(), index=ret.keys()).T
@@ -1572,18 +1795,23 @@ if __name__ == '__main__':
             "-log p_WND(y|z)",
             "-log p_WND(z)",
             "-log p_naive(y; z)",
-            "pc_first",
-            "pc_second",
+            "pc_hgg_first",
+            "pc_hgg_second",
+            "pc_wnd_first",
+            "pc_wnd_second",
             "burn_epochs",
             "n_max_positives",
             "n_max_negatives",
             "lr_embeddings",
             "lr_epoch_10",
             "lr_beta",
+            "lr_gamma",
             "sigma_max",
             "sigma_min",
             "beta_max",
             "beta_min",
+            "gamma_max",
+            "gamma_min",
             "eps_1"
         ]
         )

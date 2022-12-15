@@ -252,6 +252,10 @@ def plot_figure(adj_mat, table, path):
 
     print(table.shape)
 
+    table_ = table[:, 1:] / (
+        table[:, :1] + 1
+    )  # diffeomorphism transform to poincare ball
+
     plt.figure(figsize=(7, 7))
 
     _adj_mat = deepcopy(adj_mat)
@@ -260,15 +264,15 @@ def plot_figure(adj_mat, table, path):
 
     edges = np.array(np.where(_adj_mat == 1)).T
 
-    for edge in edges:
-        plt.plot(
-            table[edge, 0],
-            table[edge, 1],
-            color="black",
-            # marker="o",
-            alpha=0.5,
-        )
-    plt.scatter(table[:, 0], table[:, 1])
+    # for edge in edges:
+    #     plt.plot(
+    #         table_[edge, 0],
+    #         table_[edge, 1],
+    #         color="black",
+    #         # marker="o",
+    #         alpha=0.5,
+    #     )
+    plt.scatter(table_[:, 0], table_[:, 1])
     plt.gca().set_xlim(-1, 1)
     plt.gca().set_ylim(-1, 1)
     plt.gca().add_artist(plt.Circle((0, 0), 1, fill=False, edgecolor="black"))
