@@ -49,7 +49,6 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         32 / 100  # batchサイズに対応して学習率変更
     lr_beta = 0.001
     lr_gamma = 0.001
-    # lr_sigma = 0.001
     sigma_max = 1.0
     sigma_min = 0.1
     beta_min = 0.1
@@ -101,11 +100,11 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         sparse=False,
         calc_groundtruth=False
     )
-    torch.save(ret["model_hgg"].state_dict(), RESULTS + "/" + dataset_name +
+    torch.save(ret["model_hgg"], RESULTS + "/" + dataset_name +
                "/result_" + str(model_n_dim) + "_hgg.pth")
-    torch.save(ret["model_wnd"].state_dict(), RESULTS + "/" + dataset_name +
+    torch.save(ret["model_wnd"], RESULTS + "/" + dataset_name +
                "/result_" + str(model_n_dim) + "_wnd.pth")
-    torch.save(ret["model_naive"].state_dict(), RESULTS + "/" + dataset_name +
+    torch.save(ret["model_naive"], RESULTS + "/" + dataset_name +
                "/result_" + str(model_n_dim) + "_naive.pth")
 
     ret.pop('model_hgg')

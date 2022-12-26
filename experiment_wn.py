@@ -62,7 +62,11 @@ def create_wn_dataset(dataset_name):
     np.save("dataset/wn_dataset/" + dataset_name + "_data.npy", data)
 
 
-def is_a_score(is_a, n_dim, lorentz_table, alpha=1000):
+def is_a_score(is_a, n_dim, lorentz_table, alpha=1000, print_stats=False):
+    if print_stats:
+        r = arcosh(torch.Tensor(lorentz_table[:, 0]))
+        torch.set_printoptions(edgeitems=1000)
+        print(r)
 
     score_sum = 0
     for r in is_a:
@@ -95,9 +99,6 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     adj_mat = data["adj_mat"]
     is_a = data["is_a"]
 
-    # adj_mat = np.load(RESULTS + "/" + dataset_name + "/adj_mat.npy")
-    # is_a = np.load(RESULTS + "/" + dataset_name + "/is_a.npy")
-
     print("n_nodes:", len(adj_mat))
     print("n_edges:", np.sum(adj_mat) / 2)
     n_nodes = len(adj_mat)
@@ -118,13 +119,15 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
         (burn_batch_size * (n_max_positives + n_max_negatives)) / \
         32 / 100  # batchサイズに対応して学習率変更
     lr_beta = 0.001
-    lr_sigma = 0.001
+    lr_gamma = 0.001
     sigma_max = 1.0
     sigma_min = 0.001
     beta_min = 0.1
     beta_max = 10.0
+    gamma_min = 0.1
+    gamma_max = 10.0
     eps_1 = 1e-6
-    # それ以外
+    # others
     loader_workers = 16
     print("loader_workers: ", loader_workers)
     shuffle = True
@@ -136,23 +139,7 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
     result = pd.DataFrame()
-    # basescore_y_and_z_list = []
-    # basescore_y_given_z_list = []
-    # basescore_y_given_z_naive_list = []
-    # basescore_z_list = []
-    # DNML_codelength_list = []
-    # pc_first_list = []
-    # pc_second_list = []
-    # AIC_naive_list = []
-    # BIC_naive_list = []
-    # AIC_naive_from_latent_list = []
-    # BIC_naive_from_latent_list = []
-    # CV_score_list = []
-    # AUC_list = []
-    # is_a_score_naive_list = []
-    # is_a_score_latent_list = []
 
-    # for model_n_dim in model_n_dims:
     ret = DNML_HGG(
         adj_mat=adj_mat,
         params_dataset=params_dataset,
@@ -164,39 +151,29 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
         lr_embeddings=lr_embeddings,
         lr_epoch_10=lr_epoch_10,
         lr_beta=lr_beta,
-        # lr_sigma=lr_sigma,
+        lr_gamma=lr_gamma,
         sigma_min=sigma_min,
         sigma_max=sigma_max,
         beta_min=beta_min,
         beta_max=beta_max,
+        gamma_min=gamma_min,
+        gamma_max=gamma_max,
         eps_1=eps_1,
         device=device,
         loader_workers=16,
         shuffle=True,
         sparse=False,
     )
-    torch.save(ret["model_hgg"].state_dict(),
+    torch.save(ret["model_hgg"],
                RESULTS + "/" + dataset_name + "/result_" + str(model_n_dim) + "_hgg.pth")
-    torch.save(ret["model_wnd"].state_dict(),
+    torch.save(ret["model_wnd"],
                RESULTS + "/" + dataset_name + "/result_" + str(model_n_dim) + "_wnd.pth")
-    torch.save(ret["model_naive"].state_dict(),
+    torch.save(ret["model_naive"],
                RESULTS + "/" + dataset_name + "/result_" + str(model_n_dim) + "_naive.pth")
-
-    # torch.save(ret["model_wnd"].state_dict(),
-    #            "temp/result_" + str(model_n_dim) + "_wnd.pth")
-    # torch.save(ret["model_naive"].state_dict(),
-    #            "temp/result_" + str(model_n_dim) + "_naive.pth")
 
     lorentz_table_hgg = ret["model_hgg"].get_lorentz_table()
     lorentz_table_wnd = ret["model_wnd"].get_lorentz_table()
     lorentz_table_naive = ret["model_naive"].get_lorentz_table()
-
-    # is_a_score_hgg_list.append(is_a_score(
-    #     is_a, model_n_dim, lorentz_table_hgg))
-    # is_a_score_wnd_list.append(is_a_score(
-    #     is_a, model_n_dim, lorentz_table_wnd))
-    # is_a_score_naive_list.append(is_a_score(
-    #     is_a, model_n_dim, lorentz_table_naive))
 
     ret["is-a-score_hgg"] = is_a_score(
         is_a, model_n_dim, lorentz_table_hgg).cpu().numpy()
@@ -219,10 +196,13 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     ret["lr_embeddings"] = lr_embeddings
     ret["lr_epoch_10"] = lr_epoch_10
     ret["lr_beta"] = lr_beta
+    ret["lr_gamma"] = lr_gamma
     ret["sigma_max"] = sigma_max
     ret["sigma_min"] = sigma_min
     ret["beta_max"] = beta_max
     ret["beta_min"] = beta_min
+    ret["gamma_max"] = gamma_max
+    ret["gamma_min"] = gamma_min
     ret["eps_1"] = eps_1
 
     row = pd.DataFrame(ret.values(), index=ret.keys()).T
@@ -252,84 +232,29 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
         "-log p_WND(y|z)",
         "-log p_WND(z)",
         "-log p_naive(y; z)",
-        "pc_first",
-        "pc_second",
+        "pc_hgg_first",
+        "pc_hgg_second",
+        "pc_wnd_first",
+        "pc_wnd_second",
         "burn_epochs",
         "n_max_positives",
         "n_max_negatives",
         "lr_embeddings",
         "lr_epoch_10",
         "lr_beta",
+        "lr_gamma",
         "sigma_max",
         "sigma_min",
         "beta_max",
         "beta_min",
+        "gamma_max",
+        "gamma_min",
         "eps_1"
     ]
     )
 
     row.to_csv(RESULTS + "/" + dataset_name + "/result_" +
                str(model_n_dim) + ".csv", index=False)
-
-    # basescore_y_and_z_list.append(ret["basescore_y_and_z"])
-    # basescore_y_given_z_list.append(ret["basescore_y_given_z"])
-    # basescore_y_given_z_naive_list.append(ret["basescore_y_given_z_naive"])
-    # basescore_z_list.append(ret["basescore_z"])
-    # DNML_codelength_list.append(ret["DNML_codelength"])
-    # pc_first_list.append(ret["pc_first"])
-    # pc_second_list.append(ret["pc_second"])
-    # AIC_naive_list.append(ret["AIC_naive"])
-    # BIC_naive_list.append(ret["BIC_naive"])
-    # AIC_naive_from_latent_list.append(ret["AIC_naive_from_latent"])
-    # BIC_naive_from_latent_list.append(ret["BIC_naive_from_latent"])
-
-    # lorentz_table_hgg = ret["model_hgg"].get_lorentz_table()
-    # lorentz_table_wnd = ret["model_wnd"].get_lorentz_table()
-    # lorentz_table_naive = ret["model_naive"].get_lorentz_table()
-
-    # is_a_score_hgg_list.append(is_a_score(
-    #     is_a, model_n_dim, lorentz_table_hgg))
-    # is_a_score_wnd_list.append(is_a_score(
-    #     is_a, model_n_dim, lorentz_table_wnd))
-    # is_a_score_naive_list.append(is_a_score(
-    #     is_a, model_n_dim, lorentz_table_naive))
-
-    # np.save(RESULTS + "/" + dataset_name + "/embedding_" +
-    #         str(model_n_dim) + "_hgg.npy", lorentz_table_hgg)
-    # np.save(RESULTS + "/" + dataset_name + "/embedding_" +
-    #         str(model_n_dim) + "_wnd.npy", lorentz_table_wnd)
-    # np.save(RESULTS + "/" + dataset_name + "/embedding_" +
-    #         str(model_n_dim) + "_naive.npy", lorentz_table_naive)
-
-    # result["model_n_dims"] = model_n_dims
-    # result["n_nodes"] = params_dataset["n_nodes"]
-    # result["R"] = params_dataset["R"]
-    # result["DNML_codelength"] = DNML_codelength_list
-    # result["AIC_naive"] = AIC_naive_list
-    # result["BIC_naive"] = BIC_naive_list
-    # result["AIC_naive_from_latent"] = AIC_naive_from_latent_list
-    # result["BIC_naive_from_latent"] = BIC_naive_from_latent_list
-    # result["basescore_y_and_z"] = basescore_y_and_z_list
-    # result["basescore_y_given_z"] = basescore_y_given_z_list
-    # result["basescore_y_given_naive_z"] = basescore_y_given_z_naive_list
-    # result["basescore_z"] = basescore_z_list
-    # result["pc_first"] = pc_first_list
-    # result["pc_second"] = pc_second_list
-    # result["burn_epochs"] = burn_epochs
-    # result["burn_batch_size"] = burn_batch_size
-    # result["n_max_positives"] = n_max_positives
-    # result["n_max_negatives"] = n_max_negatives
-    # result["lr_embeddings"] = lr_embeddings
-    # result["lr_epoch_10"] = lr_epoch_10
-    # result["lr_beta"] = lr_beta
-    # result["lr_sigma"] = lr_sigma
-    # result["sigma_max"] = sigma_max
-    # result["sigma_min"] = sigma_min
-    # result["beta_max"] = beta_max
-    # result["beta_min"] = beta_min
-
-    # result.to_csv(RESULTS + "/" + dataset_name + "/result.csv", index=False)
-
 
 if __name__ == '__main__':
     import resource
@@ -348,7 +273,6 @@ if __name__ == '__main__':
 
     device_idx = int(args.device)
     model_n_dim = int(args.n_dim)
-    # dataset_name = args.dataset_name
 
     if int(args.dataset) == 0:
         dataset_name = "animal"
@@ -363,9 +287,9 @@ if __name__ == '__main__':
     elif int(args.dataset) == 5:
         dataset_name = "worker"
 
-    os.makedirs(RESULTS + "/" + dataset_name + "/", exist_ok=True)
+    print(dataset_name)
 
-    # model_n_dims = [2, 4, 8, 16, 32, 64]
+    os.makedirs(RESULTS + "/" + dataset_name + "/", exist_ok=True)
 
     calc_metrics_realworld(device_idx=device_idx,
                            model_n_dim=model_n_dim, dataset_name=dataset_name)
