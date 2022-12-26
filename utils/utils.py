@@ -81,20 +81,20 @@ def e_dist(
     use_torch=True
 ):
     if use_torch:
-        return torch.sum((u_e - v_e)**2, dim=1)
+        return torch.sqrt(torch.sum((u_e - v_e)**2, dim=1))
     else:
-        return np.sum((u_e - v_e)**2, axis=1)
+        return np.sqrt(np.sum((u_e - v_e)**2, axis=1))
 
 
-def h_dist_p(
-    u_e,
-    v_e,
-    use_torch=True
-):
-    ret = 1.0
-    ret += (2.0 * e_dist(u_e, v_e, use_torch)) / \
-        ((1.0 - e_dist(0.0, u_e, use_torch)) * (1.0 - e_dist(0.0, v_e, use_torch)))
-    return arcosh(ret, use_torch)
+# def h_dist_p(
+#     u_e,
+#     v_e,
+#     use_torch=True
+# ):
+#     ret = 1.0
+#     ret += (2.0 * e_dist(u_e, v_e, use_torch)) / \
+#         ((1.0 - e_dist(0.0, u_e, use_torch)) * (1.0 - e_dist(0.0, v_e, use_torch)))
+#     return arcosh(ret, use_torch)
 
 
 def tangent_norm(
