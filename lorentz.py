@@ -6,35 +6,25 @@ import sys
 import torch
 import random
 import numpy as np
-from torch import nn
-from torch import optim
+import matplotlib
+matplotlib.use("Agg")  # this needs to come before other matplotlib imports
+import matplotlib.pyplot as plt
+import torch.multiprocessing as multi
+import pandas as pd
+import gc
+import time
+import math
+from torch import nn, optim, Tensor
 from tqdm import trange, tqdm
 from collections import Counter
 from datetime import datetime
 from tensorboardX import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
-from datasets import hyperbolic_geometric_graph, connection_prob, wrapped_normal_distribution, euclidean_geometric_graph
 from copy import deepcopy
-import torch.multiprocessing as multi
 from functools import partial
-import pandas as pd
-import gc
-import time
-from torch import Tensor
 from scipy import integrate
 from sklearn import metrics
-import math
-from scipy import stats, special
-
-np.random.seed(0)
-
-import matplotlib
-
-matplotlib.use("Agg")  # this needs to come before other matplotlib imports
-import matplotlib.pyplot as plt
-
-plt.style.use("ggplot")
-
+from scipy import stats
 from utils.utils import (
     arcosh,
     h_dist,
@@ -58,87 +48,97 @@ from utils.utils_dataset import (
     create_dataset_for_basescore,
     create_dataset
 )
+from datasets import (
+    hyperbolic_geometric_graph,
+    connection_prob,
+    wrapped_normal_distribution,
+    euclidean_geometric_graph,
+    init_HGG
+)
+
+np.random.seed(0)
+plt.style.use("ggplot")
 
 
-class RSGD_HGG(optim.Optimizer):
-    """
-    Riemaniann Stochastic Gradient Descentを行う関数。
-    """
+# class RSGD_HGG(optim.Optimizer):
+#     """
+#     Riemaniann Stochastic Gradient Descentを行う関数。
+#     """
 
-    def __init__(
-        self,
-        params,
-        lr_embeddings,
-        lr_beta,
-        R,
-        beta_max,
-        beta_min,
-        device
-    ):
-        defaults = {
-            "lr_embeddings": lr_embeddings,
-            "lr_beta": lr_beta,
-            # "lr_sigma": lr_sigma,
-            'R': R,
-            # "sigma_max": sigma_max,
-            # "sigma_min": sigma_min,
-            "beta_max": beta_max,
-            "beta_min": beta_min,
-            "device": device
-        }
-        super().__init__(params, defaults=defaults)
+#     def __init__(
+#         self,
+#         params,
+#         lr_embeddings,
+#         lr_beta,
+#         R,
+#         beta_max,
+#         beta_min,
+#         device
+#     ):
+#         defaults = {
+#             "lr_embeddings": lr_embeddings,
+#             "lr_beta": lr_beta,
+#             # "lr_sigma": lr_sigma,
+#             'R': R,
+#             # "sigma_max": sigma_max,
+#             # "sigma_min": sigma_min,
+#             "beta_max": beta_max,
+#             "beta_min": beta_min,
+#             "device": device
+#         }
+#         super().__init__(params, defaults=defaults)
 
-    def step(self):
-        for group in self.param_groups:
+#     def step(self):
+#         for group in self.param_groups:
 
-            # betaとsigmaの更新
-            beta = group["params"][0]
-            # sigma = group["params"][1]
+#             # betaとsigmaの更新
+#             beta = group["params"][0]
+#             # sigma = group["params"][1]
 
-            beta_update = beta.data - \
-                group["lr_beta"] * beta.grad.data
-            beta_update = max(beta_update, group["beta_min"])
-            beta_update = min(beta_update, group["beta_max"])
-            if not math.isnan(beta_update):
-                beta.data.copy_(torch.tensor(beta_update))
+#             beta_update = beta.data - \
+#                 group["lr_beta"] * beta.grad.data
+#             beta_update = max(beta_update, group["beta_min"])
+#             beta_update = min(beta_update, group["beta_max"])
+#             if not math.isnan(beta_update):
+#                 beta.data.copy_(torch.tensor(beta_update))
 
-            # sigma_update = sigma.data - \
-            #     group["lr_sigma"] * sigma.grad.data
-            # sigma_update = max(sigma_update, group["sigma_min"])
-            # sigma_update = min(sigma_update, group["sigma_max"])
-            # if not math.isnan(sigma_update):
-            #     sigma.data.copy_(torch.tensor(sigma_update))
-            # print(group["params"])
+#             # sigma_update = sigma.data - \
+#             #     group["lr_sigma"] * sigma.grad.data
+#             # sigma_update = max(sigma_update, group["sigma_min"])
+#             # sigma_update = min(sigma_update, group["sigma_max"])
+#             # if not math.isnan(sigma_update):
+#             #     sigma.data.copy_(torch.tensor(sigma_update))
+#             # print(group["params"])
 
-            # うめこみの更新
-            for p in group["params"][1:]:
-                # print("p.grad:", p.grad)
-                if p.grad is None:
-                    continue
-                B, D = p.size()
-                gl = torch.eye(D, device=p.device, dtype=p.dtype)
-                gl[0, 0] = -1
-                grad_norm = torch.norm(p.grad.data)
-                grad_norm = torch.where(
-                    grad_norm > 1, grad_norm, torch.tensor(1.0, device=p.device))
-                # only normalize if global grad_norm is more than 1
-                h = (p.grad.data / grad_norm) @ gl
-                proj = (
-                    h
-                    + (
-                        lorentz_scalar_product(p, h)
-                    ).unsqueeze(1)
-                    * p
-                )
-                update = exp_map(p, -group["lr_embeddings"] * proj)
-                is_nan_inf = torch.isnan(update) | torch.isinf(update)
-                update = torch.where(is_nan_inf, p, update)
-                update = set_dim0(update, group["R"] * 1.00)
+#             # うめこみの更新
+#             for p in group["params"][1:]:
+#                 # print("p.grad:", p.grad)
+#                 if p.grad is None:
+#                     continue
+#                 B, D = p.size()
+#                 gl = torch.eye(D, device=p.device, dtype=p.dtype)
+#                 gl[0, 0] = -1
+#                 grad_norm = torch.norm(p.grad.data)
+#                 grad_norm = torch.where(
+#                     grad_norm > 1, grad_norm, torch.tensor(1.0, device=p.device))
+#                 # only normalize if global grad_norm is more than 1
+#                 h = (p.grad.data / grad_norm) @ gl
+#                 proj = (
+#                     h
+#                     + (
+#                         lorentz_scalar_product(p, h)
+#                     ).unsqueeze(1)
+#                     * p
+#                 )
+#                 update = exp_map(p, -group["lr_embeddings"] * proj)
+#                 is_nan_inf = torch.isnan(update) | torch.isinf(update)
+#                 update = torch.where(is_nan_inf, p, update)
+#                 update = set_dim0(update, group["R"] * 1.00)
 
-                p.data.copy_(update)
+#                 p.data.copy_(update)
 
 
-class RSGD_WND(optim.Optimizer):
+class RSGD_Lorentz(optim.Optimizer):
     """
     Riemaniann Stochastic Gradient Descentを行う関数。
     """
@@ -190,14 +190,6 @@ class RSGD_WND(optim.Optimizer):
             if not math.isnan(gamma_update):
                 gamma.data.copy_(torch.tensor(gamma_update))
 
-            # sigma_update = sigma.data - \
-            #     group["lr_sigma"] * sigma.grad.data
-            # sigma_update = max(sigma_update, group["sigma_min"])
-            # sigma_update = min(sigma_update, group["sigma_max"])
-            # if not math.isnan(sigma_update):
-            #     sigma.data.copy_(torch.tensor(sigma_update))
-            # print(group["params"])
-
             # うめこみの更新
             for p in group["params"][2:]:
                 # print("p.grad:", p.grad)
@@ -233,7 +225,6 @@ class Lorentz(nn.Module):
         n_nodes,
         n_dim,  # 次元より1つ多くデータを取る必要があることに注意
         R,
-        # beta,
         init_range=0.01,
         sparse=True,
         device="cpu",
@@ -242,17 +233,9 @@ class Lorentz(nn.Module):
         super().__init__()
         self.n_nodes = n_nodes
         self.n_dim = n_dim
-        # self.beta = nn.Parameter(torch.tensor(beta))
         self.R = R
-        # self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
         self.device = device
         self.calc_latent = calc_latent
-
-        # nn.init.normal(self.table.weight, 0, init_range)
-
-        # 0次元目をセット
-        # with torch.no_grad():
-        #     set_dim0(self.table.weight, self.R)
 
     def latent_lik(
         self,
@@ -293,24 +276,6 @@ class Lorentz(nn.Module):
         pairs,
         labels
     ):
-        # # 座標を取得
-        # us = self.table(pairs[:, 0])
-        # vs = self.table(pairs[:, 1])
-
-        # # ロス計算
-        # dist = h_dist(us, vs)
-        # loss = torch.clone(labels).float()
-        # # 数値計算の問題をlogaddexpで回避
-        # # zを固定した下でのyのロス
-        # loss = torch.where(
-        #     loss == 1,
-        #     torch.logaddexp(torch.tensor([0.0]).to(
-        #         self.device), self.beta * (dist - self.R)),
-        #     torch.logaddexp(torch.tensor([0.0]).to(
-        #         self.device), -self.beta * (dist - self.R))
-        # )
-
-        # return loss
         pass
 
     def z(
@@ -376,6 +341,7 @@ class PseudoUniform(Lorentz):
         n_dim,  # 次元より1つ多くデータを取る必要があることに注意
         R,
         beta,
+        gamma,
         sigma,
         sigma_min,
         sigma_max,
@@ -395,6 +361,7 @@ class PseudoUniform(Lorentz):
             calc_latent=calc_latent
         )
         self.beta = nn.Parameter(torch.tensor(beta))
+        self.gamma = nn.Parameter(torch.tensor(gamma))
 
         self.sigma = sigma
         self.sigma_min = sigma_min
@@ -405,20 +372,12 @@ class PseudoUniform(Lorentz):
             numerator = lambda theta: np.sin(theta)**(self.n_dim - 1 - j)
             self.I_D[j] = integrate.quad(numerator, 0, np.pi)[0]
 
-        # print("分母:", self.I_D)
-
-        # self.avg_codelength = torch.zeros(self.n_dim - 1)
-
-        # for j in range(1, self.n_dim - 1):
-        #     numerator = lambda theta: -(np.sin(theta)**(self.n_dim - 1 - j) / self.I_D[j].numpy()) * (
-        #         (self.n_dim - 1 - j) * np.log(np.sin(theta)) - np.log(self.I_D[j].numpy()))
-        #     self.avg_codelength[j] = integrate.quad(numerator, 0, np.pi)[0]
-
-        # print("平均符号長:", self.avg_codelength)
-
         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
-        # nn.init.uniform_(self.table.weight, -init_range, init_range)
-        nn.init.normal(self.table.weight, 0, init_range)
+
+        self.table.weight.data = torch.Tensor(
+            init_HGG(n_nodes, n_dim, R, sigma, beta))
+
+        # nn.init.normal(self.table.weight, 0, init_range)
 
         # 0次元目をセット
         with torch.no_grad():
@@ -441,9 +400,9 @@ class PseudoUniform(Lorentz):
         loss = torch.where(
             loss == 1,
             torch.logaddexp(torch.tensor([0.0]).to(
-                self.device), self.beta * (dist - self.R)),
+                self.device), self.beta * dist - self.gamma),
             torch.logaddexp(torch.tensor([0.0]).to(
-                self.device), -self.beta * (dist - self.R))
+                self.device), -self.beta * dist + self.gamma)
         )
 
         return loss
@@ -463,6 +422,7 @@ class PseudoUniform(Lorentz):
         self.sigma = sigma_hat
         print("sigma:", self.sigma)
         print("beta:", self.beta)
+        print("gamma:", self.gamma)
 
     def latent_lik(
         self,
@@ -521,6 +481,77 @@ class PseudoUniform(Lorentz):
 
         return lik
 
+    # def get_PC(
+    #     self,
+    #     sigma_max,
+    #     sigma_min,
+    #     beta_max,
+    #     beta_min,
+    #     sampling=True
+    # ):
+
+    #     if sampling == False:
+    #         # DNMLのPCの計算
+    #         x_e = self.get_lorentz_table()
+    #     else:
+    #         idx = np.array(range(self.n_nodes))
+    #         idx = np.random.permutation(
+    #             idx)[:min(int(self.n_nodes * 0.1), 100)]
+    #         x_e = self.get_lorentz_table()[idx, :]
+
+    #     n_nodes_sample = len(x_e)
+    #     print(n_nodes_sample)
+
+    #     # lorentz scalar product
+    #     first_term = - x_e[:, :1] * x_e[:, :1].T
+    #     remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
+    #     adj_mat = - (first_term + remaining)
+
+    #     for i in range(n_nodes_sample):
+    #         adj_mat[i, i] = 1
+    #     # distance matrix
+    #     dist_mat = np.arccosh(adj_mat)
+
+    #     is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
+    #     dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
+    #     # dist_mat
+    #     X = self.R - dist_mat
+    #     for i in range(n_nodes_sample):
+    #         X[i, i] = 0
+
+    #     # I_n
+    #     def sqrt_I_n(
+    #         beta
+    #     ):
+    # return np.sqrt(np.sum(X**2 / ((np.cosh(beta * X / 2.0) * 2)**2)) /
+    # (n_nodes_sample * (n_nodes_sample - 1)))
+
+    #     # I
+    #     def sqrt_I(
+    #         sigma
+    #     ):
+    #         # denominator = self.integral_sinh(self.n_dim - 1)
+    #         denominator = integral_sinh(
+    # n=self.n_dim - 1, n_dim=self.n_dim, sigma=self.sigma, R=self.R,
+    # exp_C=self.sigma * self.R)
+
+    #         numerator_1 = lambda r: (r**2) * ((np.exp(self.sigma * (r - self.R)) + np.exp(-self.sigma * (r + self.R)))**2) * (
+    #             (np.exp(self.sigma * (r - self.R)) - np.exp(-self.sigma * (r + self.R)))**(self.n_dim - 3))
+    #         first_term = ((self.n_dim - 1)**2) * \
+    #             integrate.quad(numerator_1, 0, self.R)[0] / denominator
+
+    #         numerator_2 = lambda r: r * (np.exp(self.sigma * (r - self.R)) + np.exp(-self.sigma * (r + self.R))) * (
+    #             (np.exp(self.sigma * (r - self.R)) - np.exp(-self.sigma * (r + self.R)))**(self.n_dim - 2))
+    #         second_term = (
+    #             (self.n_dim - 1) * integrate.quad(numerator_2, 0, self.R)[0] / denominator)**2
+
+    #         return np.sqrt(np.abs(first_term - second_term))
+
+    # return 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4
+    # * np.pi)) + np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5
+    # * (np.log(self.n_nodes) - np.log(2 * np.pi)) +
+    # np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
+
     def get_PC(
         self,
         sigma_max,
@@ -529,7 +560,6 @@ class PseudoUniform(Lorentz):
         beta_min,
         sampling=True
     ):
-
         if sampling == False:
             # DNMLのPCの計算
             x_e = self.get_lorentz_table()
@@ -554,16 +584,31 @@ class PseudoUniform(Lorentz):
 
         is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
         dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
+        X = dist_mat
         # dist_mat
-        X = self.R - dist_mat
+        # X = self.R - dist_mat
         for i in range(n_nodes_sample):
             X[i, i] = 0
 
         # I_n
         def sqrt_I_n(
-            beta
+            beta,
+            gamma
         ):
-            return np.sqrt(np.sum(X**2 / ((np.cosh(beta * X / 2.0) * 2)**2)) / (n_nodes_sample * (n_nodes_sample - 1)))
+            I_1_1 = np.sum(X**2 / ((np.cosh((beta * X - gamma) / 2.0) * 2)
+                                   ** 2)) / (n_nodes_sample * (n_nodes_sample - 1))
+            I_1_2 = np.sum(- X / ((np.cosh((beta * X - gamma) / 2.0) * 2)
+                                  ** 2)) / (n_nodes_sample * (n_nodes_sample - 1))
+            I_2_2 = 1 / ((np.cosh((beta * X - gamma) / 2.0) * 2)**2)
+            for i in range(n_nodes_sample):
+                I_2_2[i, i] = 0
+            I_2_2 = np.sum(I_2_2) / (n_nodes_sample * (n_nodes_sample - 1))
+
+            return np.sqrt(np.abs(I_1_1 * I_2_2 - I_1_2 * I_1_2))
+
+        ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
+            np.log(integrate.dblquad(sqrt_I_n, gamma_min,
+                                     gamma_max, beta_min, beta_max)[0])
 
         # I
         def sqrt_I(
@@ -585,7 +630,10 @@ class PseudoUniform(Lorentz):
 
             return np.sqrt(np.abs(first_term - second_term))
 
-        return 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5 * (np.log(self.n_nodes) - np.log(2 * np.pi)) + np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
+        ret_2 = 0.5 * (np.log(self.n_nodes) - np.log(2 * np.pi)) + \
+            np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
+
+        return ret_1, ret_2
 
 
 class WrappedNormal(Lorentz):
@@ -620,12 +668,9 @@ class WrappedNormal(Lorentz):
         self.eps_1 = eps_1
 
         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
-        # nn.init.uniform_(self.table.weight, -init_range, init_range)
-        # nn.init.normal(self.table.weight, 0, init_range)
 
         v = np.random.multivariate_normal(
-            np.zeros(self.n_dim), self.Sigma, size=self.n_nodes)
-        # print(v.shape)
+            np.zeros(self.n_dim), self.Sigma.cpu().numpy(), size=self.n_nodes)
         v_ = np.zeros((self.n_nodes, self.n_dim + 1))
         v_[:, 1:] = v  # tangent vector
 
@@ -633,11 +678,11 @@ class WrappedNormal(Lorentz):
         mean[:, 0] = 1
         x_e = exp_map(torch.tensor(mean), torch.tensor(v_)).numpy()
 
-        self.table_weight = torch.tensor(x_e)
+        self.table.weight.data = torch.Tensor(x_e)
 
         # 0次元目をセット
-        # with torch.no_grad():
-        #     set_dim0(self.table.weight, self.R)
+        with torch.no_grad():
+            set_dim0(self.table.weight, self.R)
 
     def params_mle(
         self
@@ -760,7 +805,7 @@ class WrappedNormal(Lorentz):
 
             return np.sqrt(np.abs(I_1_1 * I_2_2 - I_1_2 * I_1_2))
 
-        ret_1 = 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
+        ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
             np.log(integrate.dblquad(sqrt_I_n, gamma_min,
                                      gamma_max, beta_min, beta_max)[0])
 
@@ -771,129 +816,6 @@ class WrappedNormal(Lorentz):
                                                           (2 * np.e)) - multigamma_ln(self.n_dim / 2, self.n_dim)
 
         return ret_1, ret_2
-
-
-def CV_HGG(
-    adj_mat,
-    params_dataset,
-    model_n_dim,
-    burn_epochs,
-    burn_batch_size,
-    n_max_positives,
-    n_max_negatives,
-    learning_rate,
-    sigma_min,
-    sigma_max,
-    beta_min,
-    beta_max,
-    device,
-    k_folds=5,
-    loader_workers=16,
-    shuffle=True,
-    sparse=False
-):
-    data, _ = create_dataset(
-        adj_mat=adj_mat,
-        n_max_positives=n_max_positives,
-        n_max_negatives=n_max_negatives,
-        val_size=0.0
-    )
-
-    CV_score = 0
-
-    for fold in range(k_folds):
-        train_index = np.array([])
-        val_index = np.array([])
-        for j in range(k_folds):
-            if j == fold:
-                val_index = np.append(val_index, np.array(
-                    range(int(len(data) * j / k_folds), int(len(data) * (j + 1) / k_folds))))
-            else:
-                train_index = np.append(train_index, np.array(
-                    range(int(len(data) * j / k_folds), int(len(data) * (j + 1) / k_folds))))
-
-        train_index = np.array(train_index).reshape(-1).astype(np.int)
-        val_index = np.array(val_index).reshape(-1).astype(np.int)
-
-        train = data[train_index, :]
-        val = data[val_index, :]
-
-        dataloader = DataLoader(
-            Graph(train),
-            shuffle=shuffle,
-            batch_size=burn_batch_size * (n_max_positives + n_max_negatives),
-            num_workers=loader_workers,
-            pin_memory=True
-        )
-
-        # Rは決め打ちするとして、Tは後々平均次数とRから推定する必要がある。
-        # 平均次数とかから逆算できる気がする。
-        model = Poincare(
-            n_nodes=params_dataset['n_nodes'],
-            n_dim=model_n_dim,  # モデルの次元
-            R=params_dataset['R'],
-            sigma=1.0,
-            beta=1.0,
-            init_range=0.001,
-            sparse=sparse,
-            device=device
-        )
-        # 最適化関数。
-        rsgd = RSGD(
-            model.parameters(),
-            learning_rate=learning_rate,
-            R=params_dataset['R'],
-            sigma_max=sigma_max,
-            sigma_min=sigma_min,
-            beta_max=beta_max,
-            beta_min=beta_min,
-            device=device
-        )
-
-        model.to(device)
-
-        loss_history = []
-        start = time.time()
-
-        for epoch in range(burn_epochs):
-            if epoch != 0 and epoch % 25 == 0:  # 10 epochごとに学習率を減少
-                rsgd.param_groups[0]["learning_rate"] /= 5
-            losses = []
-            for pairs, labels in dataloader:
-
-                pairs = pairs.to(device)
-                labels = labels.to(device)
-
-                rsgd.zero_grad()
-                loss = model(pairs, labels).mean()
-                loss.backward()
-                rsgd.step()
-                losses.append(loss)
-
-            loss_history.append(torch.Tensor(losses).mean().item())
-            print("epoch:", epoch, ", loss:",
-                  torch.Tensor(losses).mean().item())
-
-        elapsed_time = time.time() - start
-        print("elapsed_time:{0}".format(elapsed_time) + "[sec]")
-
-        dataloader_all = DataLoader(
-            Graph(val),
-            shuffle=shuffle,
-            batch_size=burn_batch_size,
-            num_workers=loader_workers,
-            pin_memory=True
-        )
-
-        # -2*log(p)の計算
-        for pairs, labels in dataloader_all:
-            pairs = pairs.to(device)
-            labels = labels.to(device)
-
-            CV_score += model(pairs, labels).sum().item()
-
-    print("CV_score:", CV_score)
-    return CV_score
 
 
 def LinkPrediction(
@@ -928,7 +850,6 @@ def LinkPrediction(
 ):
 
     print("model_n_dim:", model_n_dim)
-
     print("pos data", len(positive_samples))
     print("neg data", len(negative_samples))
     print("len data", len(lik_data))
@@ -951,7 +872,7 @@ def LinkPrediction(
         sigma_min=sigma_min,
         sigma_max=sigma_max,
         beta=1.0,
-        # init_range=0.001,
+        gamma=params_dataset['R'],
         init_range=10,
         sparse=sparse,
         device=device,
@@ -961,7 +882,7 @@ def LinkPrediction(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,  # モデルの次元
         R=params_dataset['R'],
-        Sigma=torch.eye(model_n_dim),
+        Sigma=torch.eye(model_n_dim) * 10,
         beta=1.0,
         gamma=params_dataset['R'],
         eps_1=eps_1,
@@ -979,6 +900,7 @@ def LinkPrediction(
         sigma_min=sigma_min,
         sigma_max=sigma_max,
         beta=1.0,
+        gamma=params_dataset['R'],
         # init_range=0.001,
         init_range=10,
         sparse=sparse,
@@ -987,16 +909,20 @@ def LinkPrediction(
     )
 
     # 最適化関数。
-    rsgd_hgg = RSGD_HGG(
+    rsgd_hgg = RSGD_Lorentz(
         model_hgg.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
+        lr_gamma=lr_gamma,
         R=params_dataset['R'],
         beta_max=beta_max,
         beta_min=beta_min,
+        gamma_min=gamma_min,
+        gamma_max=gamma_max,
         device=device
+
     )
-    rsgd_wnd = RSGD_WND(
+    rsgd_wnd = RSGD_Lorentz(
         model_wnd.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
@@ -1008,13 +934,16 @@ def LinkPrediction(
         gamma_max=gamma_max,
         device=device
     )
-    rsgd_naive = RSGD_HGG(
+    rsgd_naive = RSGD_Lorentz(
         model_naive.parameters(),
         lr_embeddings=lr_embeddings,
         lr_beta=lr_beta,
+        lr_gamma=lr_gamma,
         R=params_dataset['R'],
         beta_max=beta_max,
         beta_min=beta_min,
+        gamma_min=gamma_min,
+        gamma_max=gamma_max,
         device=device
     )
 
@@ -1121,18 +1050,25 @@ def LinkPrediction(
 
     # Non-identifiable model
     AIC_naive = basescore_y_given_z_naive + \
-        (params_dataset['n_nodes'] * model_n_dim + 1)
-    BIC_naive = basescore_y_given_z_naive + ((params_dataset['n_nodes'] * model_n_dim + 1) / 2) * (
+        (params_dataset['n_nodes'] * model_n_dim + 2)
+    BIC_naive = basescore_y_given_z_naive + ((params_dataset['n_nodes'] * model_n_dim + 2) / 2) * (
         np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
 
     # DNML-HGG
     pc_hgg_first, pc_hgg_second = model_hgg.get_PC(
-        sigma_max, sigma_min, beta_max, beta_min, sampling=True)
+        sigma_max,
+        sigma_min,
+        beta_max,
+        beta_min,
+        gamma_min,
+        gamma_max,
+        sampling=True
+    )
     DNML_HGG = basescore_y_and_z_hgg + pc_hgg_first + pc_hgg_second
 
-    AIC_HGG = basescore_y_and_z_hgg + 2
+    AIC_HGG = basescore_y_and_z_hgg + 3
     BIC_HGG = basescore_y_and_z_hgg + 0.5 * (np.log(params_dataset['n_nodes']) + np.log(
-        params_dataset['n_nodes'] - 1) - np.log(2)) + 0.5 * np.log(params_dataset['n_nodes'])
+        params_dataset['n_nodes'] - 1) - np.log(2)) + np.log(params_dataset['n_nodes'])
 
     # DNML-WND
     pc_wnd_first, pc_wnd_second = model_wnd.get_PC(
@@ -1143,8 +1079,8 @@ def LinkPrediction(
         sampling=True
     )
     DNML_WND = basescore_y_and_z_wnd + pc_wnd_first + pc_wnd_second
-    AIC_WND = basescore_y_and_z_wnd + model_n_dim * (model_n_dim + 1) / 2 + 1
-    BIC_WND = basescore_y_and_z_wnd + 0.5 * (np.log(params_dataset['n_nodes']) + np.log(
+    AIC_WND = basescore_y_and_z_wnd + model_n_dim * (model_n_dim + 1) / 2 + 2
+    BIC_WND = basescore_y_and_z_wnd + (np.log(params_dataset['n_nodes']) + np.log(
         params_dataset['n_nodes'] - 1) - np.log(2)) + (model_n_dim * (model_n_dim + 1) / 4) * np.log(params_dataset['n_nodes'])
 
     # Calculate AUC from probability
@@ -1289,166 +1225,6 @@ def LinkPrediction(
     }
 
     return ret
-
-
-def define_models_opts(
-    params_dataset,
-    model_n_dim,
-    lr_embeddings,
-    lr_beta,
-    lr_gamma,
-    beta_min,
-    beta_max,
-    sigma_min,
-    sigma_max,
-    gamma_min,
-    gamma_max,
-    eps_1,
-    sparse,
-    device
-):
-    # model
-    model_hgg = PseudoUniform(
-        n_nodes=params_dataset['n_nodes'],
-        n_dim=model_n_dim,  # モデルの次元
-        R=params_dataset['R'],
-        sigma=1.0,
-        sigma_min=sigma_min,
-        sigma_max=sigma_max,
-        beta=1.0,
-        # init_range=0.001,
-        init_range=10,
-        sparse=sparse,
-        device=device,
-        calc_latent=True
-    )
-    model_wnd = WrappedNormal(
-        n_nodes=params_dataset['n_nodes'],
-        n_dim=model_n_dim,  # モデルの次元
-        R=params_dataset['R'],
-        Sigma=torch.eye(model_n_dim),
-        beta=1.0,
-        gamma=params_dataset['R'],
-        eps_1=eps_1,
-        # init_range=0.001,
-        init_range=10,
-        sparse=sparse,
-        device=device,
-        calc_latent=True
-    )
-    model_naive = PseudoUniform(
-        n_nodes=params_dataset['n_nodes'],
-        n_dim=model_n_dim,  # モデルの次元
-        R=params_dataset['R'],
-        sigma=1.0,
-        sigma_min=sigma_min,
-        sigma_max=sigma_max,
-        beta=1.0,
-        # init_range=0.001,
-        init_range=10,
-        sparse=sparse,
-        device=device,
-        calc_latent=False
-    )
-    # 最適化関数。
-    rsgd_hgg = RSGD_HGG(
-        model_hgg.parameters(),
-        lr_embeddings=lr_embeddings,
-        lr_beta=lr_beta,
-        R=params_dataset['R'],
-        beta_max=beta_max,
-        beta_min=beta_min,
-        device=device
-    )
-    rsgd_wnd = RSGD_WND(
-        model_wnd.parameters(),
-        lr_embeddings=lr_embeddings,
-        lr_beta=lr_beta,
-        lr_gamma=lr_gamma,
-        R=params_dataset['R'],
-        beta_max=beta_max,
-        beta_min=beta_min,
-        gamma_min=gamma_min,
-        gamma_max=gamma_max,
-        device=device
-    )
-    rsgd_naive = RSGD_HGG(
-        model_naive.parameters(),
-        lr_embeddings=lr_embeddings,
-        lr_beta=lr_beta,
-        R=params_dataset['R'],
-        beta_max=beta_max,
-        beta_min=beta_min,
-        device=device
-    )
-
-    model_hgg.to(device)
-    model_wnd.to(device)
-    model_naive.to(device)
-
-    return model_hgg, model_wnd, model_naive, rsgd_hgg, rsgd_wnd, rsgd_naive
-
-
-def train_models(
-    burn_epochs,
-    model_hgg,
-    model_wnd,
-    model_naive,
-    rsgd_hgg,
-    rsgd_wnd,
-    rsgd_naive,
-    lr_epoch_10,
-):
-    for epoch in range(burn_epochs):
-        # if epoch != 0 and epoch % 30 == 0:  # 10 epochごとに学習率を減少
-            # rsgd.param_groups[0]["lr_embeddings"] /= 5
-        if epoch == 10:
-            rsgd_hgg.param_groups[0]["lr_embeddings"] = lr_epoch_10
-            rsgd_wnd.param_groups[0]["lr_embeddings"] = lr_epoch_10
-            rsgd_naive.param_groups[0]["lr_embeddings"] = lr_epoch_10
-
-        losses_hgg = []
-        losses_wnd = []
-        losses_naive = []
-
-        # MLE
-        model_hgg.params_mle()
-        model_wnd.params_mle()
-
-        for pairs, labels in dataloader:
-            pairs = pairs.reshape((-1, 2))
-            labels = labels.reshape(-1)
-
-            pairs = pairs.to(device)
-            labels = labels.to(device)
-
-            # DNML-HGG
-            rsgd_hgg.zero_grad()
-            loss_hgg = model_hgg(pairs, labels).mean()
-            loss_hgg.backward()
-            rsgd_hgg.step()
-            losses_hgg.append(loss_hgg)
-
-            # DNML-WND
-            rsgd_wnd.zero_grad()
-            loss_wnd = model_wnd(pairs, labels).mean()
-            loss_wnd.backward()
-            rsgd_wnd.step()
-            losses_wnd.append(loss_wnd)
-
-            # Naive model
-            rsgd_naive.zero_grad()
-            loss_naive = model_naive(pairs, labels).mean()
-            loss_naive.backward()
-            rsgd_naive.step()
-            losses_naive.append(loss_naive)
-
-        print("epoch:", epoch, ", loss_hgg:",
-              torch.Tensor(losses_hgg).mean().item())
-        print("epoch:", epoch, ", loss_wnd:",
-              torch.Tensor(losses_wnd).mean().item())
-        print("loss_naive:",
-              torch.Tensor(losses_naive).mean().item())
 
 
 def DNML_HGG(
@@ -1739,7 +1515,8 @@ def DNML_HGG(
 
 if __name__ == '__main__':
     # データセット作成
-    n_nodes = 6400
+    # n_nodes = 6400
+    n_nodes = 400
 
     print("R:", np.log(n_nodes))
 
@@ -1752,8 +1529,8 @@ if __name__ == '__main__':
     }
 
     # パラメータ
-    burn_epochs = 800
-    # burn_epochs = 5
+    # burn_epochs = 800
+    burn_epochs = 5
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     lr_beta = 0.001
@@ -1801,8 +1578,6 @@ if __name__ == '__main__':
     neg_train_graph = len(np.where(train_graph == 0)[0])
     ratio = neg_train_graph / pos_train_graph
     print("ratio:", ratio)
-
-    # ratio=10
 
     n_max_negatives = int(n_max_positives * ratio)
     print("n_max_negatives:", n_max_negatives)

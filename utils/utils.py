@@ -22,7 +22,7 @@ import time
 from scipy import integrate
 from sklearn import metrics
 import math
-from scipy import stats
+from scipy import stats, special
 from sklearn.linear_model import LogisticRegression
 
 np.random.seed(0)

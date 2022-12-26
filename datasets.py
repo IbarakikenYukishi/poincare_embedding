@@ -75,10 +75,7 @@ def calc_dist_r(n_dim, sigma, R, div=INTEGRAL_DIV):
     return r_array, cum_dens
 
 
-def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, beta):
-    # TODO: プログラム前半部分も実行時間を短くする。
-    # 現状は次元の2乗オーダーの計算量
-    # n_dimは2以上で
+def init_HGG(n_nodes, n_dim, R, sigma, beta):
     x_polar = np.random.uniform(0, 1, (n_nodes, n_dim))
     # 逆関数法で点を双曲空間からサンプリング
     # 双曲空間の意味での極座標で表示
@@ -94,6 +91,15 @@ def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, beta):
     print('sampling ended')
 
     x_e = convert_euclid(x_polar)
+
+    return x_e
+
+
+def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, beta):
+    # TODO: プログラム前半部分も実行時間を短くする。
+    # 現状は次元の2乗オーダーの計算量
+    # n_dimは2以上で
+    x_e = init_HGG(n_nodes, n_dim, R, sigma, beta)
 
     print('convert euclid ended')
 
@@ -379,15 +385,15 @@ if __name__ == '__main__':
     # print('average degree:', np.sum(adj_mat) / len(adj_mat))
     # plot_figure(adj_mat, x_e, "wnd_test.png")
 
-    adj_mat, x_e = euclidean_geometric_graph(
-        n_nodes=400,
-        n_dim=2,
-        R=np.log(6400),
-        Sigma=np.eye(2) * 100,
-        beta=0.8
-    )
-    # 平均次数が少なくなるように手で調整する用
-    print('average degree:', np.sum(adj_mat) / len(adj_mat))
+    # adj_mat, x_e = euclidean_geometric_graph(
+    #     n_nodes=400,
+    #     n_dim=2,
+    #     R=np.log(6400),
+    #     Sigma=np.eye(2) * 100,
+    #     beta=0.8
+    # )
+    # # 平均次数が少なくなるように手で調整する用
+    # print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
     # # WND
     # n_dim_true_list = [4, 8, 16]
@@ -447,60 +453,60 @@ if __name__ == '__main__':
     #                     params_adj_mat['n_nodes']) + '_' + str(count) + '.npy', graph_dict)
     #                 count += 1
 
-    # # HGG
-    # n_dim_true_list = [4, 8, 16]
-    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    # sigma_list = [0.5, 1.0, 2.0]
-    # beta_list = [0.6, 0.8, 1.0, 1.2]
+    # HGG
+    n_dim_true_list = [4, 8, 16]
+    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    sigma_list = [0.5, 1.0, 2.0]
+    beta_list = [0.6, 0.8, 1.0, 1.2]
 
-    # for n_dim_true in n_dim_true_list:
-    #     for n_nodes in n_nodes_list:
-    #         count = 0
-    #         for sigma in sigma_list:
-    #             for beta in beta_list:
-    #                 p_list = {
-    #                     "n_dim_true": n_dim_true,
-    #                     "n_nodes": n_nodes,
-    #                     "sigma": sigma,
-    #                     "beta": beta
-    #                 }
-    #                 print(p_list)
-    #                 params_adj_mat = {
-    #                     'n_nodes': n_nodes,
-    #                     'n_dim': n_dim_true,
-    #                     'R': np.log(n_nodes),
-    #                     'sigma': sigma,
-    #                     'beta': beta
-    #                 }
-    #                 adj_mat, x_e = hyperbolic_geometric_graph(
-    #                     n_nodes=params_adj_mat["n_nodes"],
-    #                     n_dim=params_adj_mat["n_dim"],
-    #                     R=params_adj_mat["R"],
-    #                     sigma=params_adj_mat["sigma"],
-    #                     beta=params_adj_mat["beta"]
-    #                 )
+    for n_dim_true in n_dim_true_list:
+        for n_nodes in n_nodes_list:
+            count = 0
+            for sigma in sigma_list:
+                for beta in beta_list:
+                    p_list = {
+                        "n_dim_true": n_dim_true,
+                        "n_nodes": n_nodes,
+                        "sigma": sigma,
+                        "beta": beta
+                    }
+                    print(p_list)
+                    params_adj_mat = {
+                        'n_nodes': n_nodes,
+                        'n_dim': n_dim_true,
+                        'R': np.log(n_nodes),
+                        'sigma': sigma,
+                        'beta': beta
+                    }
+                    adj_mat, x_e = hyperbolic_geometric_graph(
+                        n_nodes=params_adj_mat["n_nodes"],
+                        n_dim=params_adj_mat["n_dim"],
+                        R=params_adj_mat["R"],
+                        sigma=params_adj_mat["sigma"],
+                        beta=params_adj_mat["beta"]
+                    )
 
-    #                 positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
-    #                     adj_mat, params_adj_mat)
+                    positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
+                        adj_mat, params_adj_mat)
 
-    #                 # 平均次数が少なくなるように手で調整する用
-    #                 print('average degree:', np.sum(adj_mat) / len(adj_mat))
+                    # 平均次数が少なくなるように手で調整する用
+                    print('average degree:', np.sum(adj_mat) / len(adj_mat))
 
-    #                 adj_mat = coo_matrix(adj_mat)
-    #                 train_graph = coo_matrix(train_graph)
+                    adj_mat = coo_matrix(adj_mat)
+                    train_graph = coo_matrix(train_graph)
 
-    #                 graph_dict = {
-    #                     "params_adj_mat": params_adj_mat,
-    #                     "adj_mat": adj_mat,
-    #                     "positive_samples": positive_samples,
-    #                     "negative_samples": negative_samples,
-    #                     "train_graph": train_graph,
-    #                     "lik_data": lik_data,
-    #                     "x_e": x_e
-    #                 }
+                    graph_dict = {
+                        "params_adj_mat": params_adj_mat,
+                        "adj_mat": adj_mat,
+                        "positive_samples": positive_samples,
+                        "negative_samples": negative_samples,
+                        "train_graph": train_graph,
+                        "lik_data": lik_data,
+                        "x_e": x_e
+                    }
 
-    #                 os.makedirs('dataset/dim_' +
-    #                             str(params_adj_mat['n_dim']), exist_ok=True)
-    #                 np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
-    #                     params_adj_mat['n_nodes']) + '_' + str(count) + '.npy', graph_dict)
-    #                 count += 1
+                    os.makedirs('dataset/dim_' +
+                                str(params_adj_mat['n_dim']), exist_ok=True)
+                    np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
+                        params_adj_mat['n_nodes']) + '_' + str(count) + '.npy', graph_dict)
+                    count += 1
