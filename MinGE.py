@@ -202,28 +202,29 @@ def lexical_dataset(n_dim_list, dataset_name):
 if __name__ == "__main__":
     weight_entropy = 1.0
 
-    # artificial dataset
-    n_dim_true_list = [4, 8, 16]
-    for n_dim_true in n_dim_true_list:
-        artificial_dataset(n_dim_true)
+    # # artificial dataset
+    # n_dim_true_list = [4, 8, 16]
+    # for n_dim_true in n_dim_true_list:
+    #     artificial_dataset(n_dim_true)
 
-    # link prediction
-    n_dim_list = [2, 4, 8, 16, 32, 64]
-    dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
+    # # link prediction
+    # n_dim_list = [2, 4, 8, 16, 32, 64]
+    # dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
 
-    for dataset_name in dataset_name_list:
-        result = pd.DataFrame()
-        entropy_list = calc_GE_realworld(
-            dataset_name, n_dim_list, weight_entropy)
+    # for dataset_name in dataset_name_list:
+    #     result = pd.DataFrame()
+    #     entropy_list = calc_GE_realworld(
+    #         dataset_name, n_dim_list, weight_entropy)
 
-        result["model_n_dims"] = n_dim_list
-        result["MinGE"] = entropy_list
+    #     result["model_n_dims"] = n_dim_list
+    #     result["MinGE"] = entropy_list
 
-        result.to_csv(RESULTS + "/" + dataset_name +
-                      "/result_MinGE.csv", index=False)
+    #     result.to_csv(RESULTS + "/" + dataset_name +
+    #                   "/result_MinGE.csv", index=False)
 
     # lexical dataset
-    n_dim_list = [2, 4, 8, 16, 32, 64]
+    # n_dim_list = [2, 4, 8, 16, 32, 64]
+    n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
     dataset_name_list = [
         "animal",
         "group",
