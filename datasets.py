@@ -169,6 +169,52 @@ def wrapped_normal_distribution(n_nodes, n_dim, R, Sigma, beta):
     return adj_mat, x_e
 
 
+def euclidean_geometric_graph(n_nodes, n_dim, R, Sigma, beta):
+    x_e = np.random.multivariate_normal(
+        np.zeros(n_dim), Sigma, size=n_nodes)
+    # print(v.shape)
+    # v_ = np.zeros((n_nodes, n_dim + 1))
+    # v_[:, 1:] = v  # tangent vector
+
+    # mean = np.zeros((n_nodes, n_dim + 1))
+    # mean[:, 0] = 1
+    # x_e = exp_map(torch.tensor(mean), torch.tensor(v_)).numpy()
+
+    print('convert euclid ended')
+
+    adj_mat = np.zeros((n_nodes, n_nodes))
+    # サンプリング用の行列
+    sampling_mat = np.random.uniform(0, 1, adj_mat.shape)
+    sampling_mat = np.triu(
+        sampling_mat) + np.triu(sampling_mat).T - np.diag(sampling_mat.diagonal())
+
+    # lorentz scalar product
+    def distance_mat(X, Y):
+        X = X[:, np.newaxis, :]
+        Y = Y[np.newaxis, :, :]
+        Z = np.sqrt(np.sum((X - Y) ** 2, axis=2))
+        return Z
+
+    adj_mat = distance_mat(x_e, x_e)
+
+    for i in range(n_nodes):
+        adj_mat[i, i] = 1
+
+    # probability matrix
+    adj_mat = connection_prob(adj_mat, R, beta)
+
+    for i in range(n_nodes):
+        adj_mat[i, i] = 0
+
+    adj_mat = np.where(sampling_mat < adj_mat, 1, 0)
+
+    print(adj_mat)
+
+    print("adj mat generated")
+
+    return adj_mat, x_e
+
+
 def convert_euclid(x_polar):
     n_nodes = x_polar.shape[0]
     n_dim = x_polar.shape[1]
@@ -319,22 +365,34 @@ def beta_hat__(n_nodes, n_dim, beta, sigma, beta_min, beta_max):
 
 if __name__ == '__main__':
 
-    adj_mat, x_e = wrapped_normal_distribution(
+    # R (gamma)
+    # Sigma
+    # beta
+    # adj_mat, x_e = wrapped_normal_distribution(
+    #     n_nodes=400,
+    #     n_dim=2,
+    #     R=np.log(6400),
+    #     Sigma=np.eye(2) * 10,
+    #     beta=0.8
+    # )
+    # # 平均次数が少なくなるように手で調整する用
+    # print('average degree:', np.sum(adj_mat) / len(adj_mat))
+    # plot_figure(adj_mat, x_e, "wnd_test.png")
+
+    adj_mat, x_e = euclidean_geometric_graph(
         n_nodes=400,
         n_dim=2,
         R=np.log(6400),
-        Sigma=np.eye(2) * 10,
+        Sigma=np.eye(2) * 100,
         beta=0.8
     )
     # 平均次数が少なくなるように手で調整する用
     print('average degree:', np.sum(adj_mat) / len(adj_mat))
-    plot_figure(adj_mat, x_e, "wnd_test.png")
-
 
     # # WND
     # n_dim_true_list = [4, 8, 16]
     # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    # sigma_list = [0.5, 1.0, 2.0]
+    # sigma_list = [0.5, 0.55, 0.6]
     # beta_list = [0.6, 0.8, 1.0, 1.2]
 
     # for n_dim_true in n_dim_true_list:
@@ -353,14 +411,14 @@ if __name__ == '__main__':
     #                     'n_nodes': n_nodes,
     #                     'n_dim': n_dim_true,
     #                     'R': np.log(n_nodes),
-    #                     'sigma': sigma,
+    #                     'Sigma': np.eye(n_dim_true) * ((np.log(n_nodes) * sigma)**2),
     #                     'beta': beta
     #                 }
-    #                 adj_mat, x_e = hyperbolic_geometric_graph(
+    #                 adj_mat, x_e = wrapped_normal_distribution(
     #                     n_nodes=params_adj_mat["n_nodes"],
     #                     n_dim=params_adj_mat["n_dim"],
     #                     R=params_adj_mat["R"],
-    #                     sigma=params_adj_mat["sigma"],
+    #                     Sigma=params_adj_mat["Sigma"],
     #                     beta=params_adj_mat["beta"]
     #                 )
 
@@ -383,9 +441,9 @@ if __name__ == '__main__':
     #                     "x_e": x_e
     #                 }
 
-    #                 os.makedirs('dataset/dim_' +
+    #                 os.makedirs('dataset/WND/dim_' +
     #                             str(params_adj_mat['n_dim']), exist_ok=True)
-    #                 np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
+    #                 np.save('dataset/WND/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
     #                     params_adj_mat['n_nodes']) + '_' + str(count) + '.npy', graph_dict)
     #                 count += 1
 
