@@ -15,7 +15,7 @@ from torch.utils.data import Dataset, DataLoader
 # from datasets import hyperbolic_geometric_graph, connection_prob, create_dataset, create_dataset_for_basescore
 from copy import deepcopy
 import torch.multiprocessing as multi
-from functools import partial
+from functools import partial, lru_cache
 import pandas as pd
 import gc
 import time
@@ -33,6 +33,11 @@ matplotlib.use("Agg")  # this needs to come before other matplotlib imports
 import matplotlib.pyplot as plt
 
 plt.style.use("ggplot")
+
+
+@lru_cache(maxsize=None)
+def multigamma_ln(a, d):
+    return special.multigammaln(a, d)
 
 
 def arcosh(
