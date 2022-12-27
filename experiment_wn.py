@@ -6,17 +6,18 @@ import numpy as np
 import pandas as pd
 import gc
 import time
-from copy import deepcopy
-from torch.utils.data import DataLoader
-from lorentz import CV_HGG, DNML_HGG, LinkPrediction, create_test_for_link_prediction
-from lorentz import arcosh, h_dist
-import torch.multiprocessing as multi
-from functools import partial
-from scipy.io import mmread
 import matplotlib.pyplot as plt
 import matplotlib
-from scipy import stats
+import torch.multiprocessing as multi
 import os
+from functools import partial
+from scipy.io import mmread
+from copy import deepcopy
+from torch.utils.data import DataLoader
+from lorentz import LinkPrediction
+from utils.utils import arcosh, h_dist
+from utils.utils_dataset import create_dataset_for_basescore
+from scipy import stats
 
 
 RESULTS = "results"
@@ -90,7 +91,6 @@ def is_a_score(is_a, n_dim, lorentz_table, alpha=1000, print_stats=False):
 
 
 def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
-
     if not os.path.exists("dataset/wn_dataset/" + dataset_name + "_data.npy"):
         create_wn_dataset(dataset_name)
 
@@ -107,6 +107,12 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
         'n_nodes': n_nodes,
         'R': np.log(n_nodes),
     }
+
+    # data for calculating likelihood
+    lik_data = create_dataset_for_basescore(
+        adj_mat=adj_mat,
+        n_max_samples=int((n_nodes - 1) * 0.1)
+    )
 
     # パラメータ
     burn_epochs = 800
@@ -127,6 +133,7 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     gamma_min = 0.1
     gamma_max = 10.0
     eps_1 = 1e-6
+    eps_2 = 1e3
     # others
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -140,8 +147,12 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
 
     result = pd.DataFrame()
 
-    ret = DNML_HGG(
-        adj_mat=adj_mat,
+    ret = LinkPrediction(
+        train_graph=adj_mat,
+        positive_samples=None,
+        negative_samples=None,
+        lik_data=lik_data,
+        x_lorentz=None,
         params_dataset=params_dataset,
         model_n_dim=model_n_dim,
         burn_epochs=burn_epochs,
@@ -159,11 +170,18 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
         gamma_min=gamma_min,
         gamma_max=gamma_max,
         eps_1=eps_1,
+        eps_2=eps_2,
         device=device,
+        calc_HGG=True,
+        calc_WND=True,
+        calc_naive=True,
+        calc_othermetrics=False,
+        calc_groundtruth=False,
         loader_workers=16,
         shuffle=True,
-        sparse=False,
+        sparse=False
     )
+
     torch.save(ret["model_hgg"],
                RESULTS + "/" + dataset_name + "/result_" + str(model_n_dim) + "_hgg.pth")
     torch.save(ret["model_wnd"],
@@ -204,6 +222,7 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     ret["gamma_max"] = gamma_max
     ret["gamma_min"] = gamma_min
     ret["eps_1"] = eps_1
+    ret["eps_2"] = eps_2
 
     row = pd.DataFrame(ret.values(), index=ret.keys()).T
 
@@ -249,7 +268,8 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
         "beta_min",
         "gamma_max",
         "gamma_min",
-        "eps_1"
+        "eps_1",
+        "eps_2"
     ]
     )
 
