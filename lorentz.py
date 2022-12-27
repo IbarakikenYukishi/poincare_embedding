@@ -374,10 +374,10 @@ class PseudoUniform(Lorentz):
 
         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
 
-        self.table.weight.data = torch.Tensor(
-            init_HGG(n_nodes, n_dim, R, sigma, beta))
+        # self.table.weight.data = torch.Tensor(
+        #     init_HGG(n_nodes, n_dim, R, sigma, beta))
 
-        # nn.init.normal(self.table.weight, 0, init_range)
+        nn.init.normal(self.table.weight, 0, init_range)
 
         # 0次元目をセット
         with torch.no_grad():
@@ -481,83 +481,14 @@ class PseudoUniform(Lorentz):
 
         return lik
 
-    # def get_PC(
-    #     self,
-    #     sigma_max,
-    #     sigma_min,
-    #     beta_max,
-    #     beta_min,
-    #     sampling=True
-    # ):
-
-    #     if sampling == False:
-    #         # DNMLのPCの計算
-    #         x_e = self.get_lorentz_table()
-    #     else:
-    #         idx = np.array(range(self.n_nodes))
-    #         idx = np.random.permutation(
-    #             idx)[:min(int(self.n_nodes * 0.1), 100)]
-    #         x_e = self.get_lorentz_table()[idx, :]
-
-    #     n_nodes_sample = len(x_e)
-    #     print(n_nodes_sample)
-
-    #     # lorentz scalar product
-    #     first_term = - x_e[:, :1] * x_e[:, :1].T
-    #     remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
-    #     adj_mat = - (first_term + remaining)
-
-    #     for i in range(n_nodes_sample):
-    #         adj_mat[i, i] = 1
-    #     # distance matrix
-    #     dist_mat = np.arccosh(adj_mat)
-
-    #     is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
-    #     dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
-    #     # dist_mat
-    #     X = self.R - dist_mat
-    #     for i in range(n_nodes_sample):
-    #         X[i, i] = 0
-
-    #     # I_n
-    #     def sqrt_I_n(
-    #         beta
-    #     ):
-    # return np.sqrt(np.sum(X**2 / ((np.cosh(beta * X / 2.0) * 2)**2)) /
-    # (n_nodes_sample * (n_nodes_sample - 1)))
-
-    #     # I
-    #     def sqrt_I(
-    #         sigma
-    #     ):
-    #         # denominator = self.integral_sinh(self.n_dim - 1)
-    #         denominator = integral_sinh(
-    # n=self.n_dim - 1, n_dim=self.n_dim, sigma=self.sigma, R=self.R,
-    # exp_C=self.sigma * self.R)
-
-    #         numerator_1 = lambda r: (r**2) * ((np.exp(self.sigma * (r - self.R)) + np.exp(-self.sigma * (r + self.R)))**2) * (
-    #             (np.exp(self.sigma * (r - self.R)) - np.exp(-self.sigma * (r + self.R)))**(self.n_dim - 3))
-    #         first_term = ((self.n_dim - 1)**2) * \
-    #             integrate.quad(numerator_1, 0, self.R)[0] / denominator
-
-    #         numerator_2 = lambda r: r * (np.exp(self.sigma * (r - self.R)) + np.exp(-self.sigma * (r + self.R))) * (
-    #             (np.exp(self.sigma * (r - self.R)) - np.exp(-self.sigma * (r + self.R)))**(self.n_dim - 2))
-    #         second_term = (
-    #             (self.n_dim - 1) * integrate.quad(numerator_2, 0, self.R)[0] / denominator)**2
-
-    #         return np.sqrt(np.abs(first_term - second_term))
-
-    # return 0.5 * (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4
-    # * np.pi)) + np.log(integrate.quad(sqrt_I_n, beta_min, beta_max)[0]), 0.5
-    # * (np.log(self.n_nodes) - np.log(2 * np.pi)) +
-    # np.log(integrate.quad(sqrt_I, sigma_min, sigma_max)[0])
-
     def get_PC(
         self,
         sigma_max,
         sigma_min,
         beta_max,
         beta_min,
+        gamma_max,
+        gamma_min,
         sampling=True
     ):
         if sampling == False:
@@ -606,9 +537,10 @@ class PseudoUniform(Lorentz):
 
             return np.sqrt(np.abs(I_1_1 * I_2_2 - I_1_2 * I_1_2))
 
+        integral, _ = integrate.dblquad(sqrt_I_n, gamma_min,
+                                        gamma_max, beta_min, beta_max)
         ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
-            np.log(integrate.dblquad(sqrt_I_n, gamma_min,
-                                     gamma_max, beta_min, beta_max)[0])
+            np.log(integral)
 
         # I
         def sqrt_I(
@@ -646,7 +578,6 @@ class WrappedNormal(Lorentz):
         Sigma,
         beta,
         gamma,
-        eps_1,
         init_range=0.01,
         sparse=True,
         device="cpu",
@@ -665,7 +596,6 @@ class WrappedNormal(Lorentz):
         self.beta = nn.Parameter(torch.tensor(beta))
         self.gamma = nn.Parameter(torch.tensor(gamma))
         self.Sigma = Sigma.to(self.device)
-        self.eps_1 = eps_1
 
         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
 
@@ -678,7 +608,9 @@ class WrappedNormal(Lorentz):
         mean[:, 0] = 1
         x_e = exp_map(torch.tensor(mean), torch.tensor(v_)).numpy()
 
-        self.table.weight.data = torch.Tensor(x_e)
+        # self.table.weight.data = torch.Tensor(x_e)
+
+        nn.init.normal(self.table.weight, 0, init_range)
 
         # 0次元目をセット
         with torch.no_grad():
@@ -757,6 +689,8 @@ class WrappedNormal(Lorentz):
         beta_max,
         gamma_min,
         gamma_max,
+        eps_1,
+        eps_2,
         sampling
     ):
         if sampling == False:
@@ -805,15 +739,20 @@ class WrappedNormal(Lorentz):
 
             return np.sqrt(np.abs(I_1_1 * I_2_2 - I_1_2 * I_1_2))
 
+        integral, _ = integrate.dblquad(sqrt_I_n, gamma_min,
+                                        gamma_max, beta_min, beta_max)
         ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
-            np.log(integrate.dblquad(sqrt_I_n, gamma_min,
-                                     gamma_max, beta_min, beta_max)[0])
+            np.log(integral)
 
         ret_2 = 0
+        ret_2 += (0.5 * self.n_dim**2) * np.log(np.pi)
+        ret_2 += 0.5 * (self.n_dim * (self.n_dim - 1)) * np.log(eps_2)
+        ret_2 += -multigamma_ln(self.n_nodes / 2, self.n_dim) - \
+            multigamma_ln(self.n_dim / 2, self.n_dim)
+        ret_2 += (self.n_nodes * self.n_dim / 2) * \
+            np.log(self.n_nodes / (2 * np.e))
         ret_2 += self.n_dim * np.log(2 / (self.n_dim - 1))
-        ret_2 += (1 - self.n_dim) * self.n_dim * np.log(self.eps_1) / 2
-        ret_2 += (self.n_nodes * self.n_dim / 2) * np.log(self.n_nodes /
-                                                          (2 * np.e)) - multigamma_ln(self.n_dim / 2, self.n_dim)
+        ret_2 += (1 - self.n_dim) * self.n_dim * np.log(eps_1) / 2
 
         return ret_1, ret_2
 
@@ -842,6 +781,7 @@ def LinkPrediction(
     gamma_min,
     gamma_max,
     eps_1,
+    eps_2,
     device,
     loader_workers=16,
     shuffle=True,
@@ -885,7 +825,7 @@ def LinkPrediction(
         Sigma=torch.eye(model_n_dim) * 10,
         beta=1.0,
         gamma=params_dataset['R'],
-        eps_1=eps_1,
+        # eps_1=eps_1,
         # init_range=0.001,
         init_range=10,
         sparse=sparse,
@@ -1058,8 +998,8 @@ def LinkPrediction(
     pc_hgg_first, pc_hgg_second = model_hgg.get_PC(
         sigma_max,
         sigma_min,
-        beta_max,
         beta_min,
+        beta_max,
         gamma_min,
         gamma_max,
         sampling=True
@@ -1076,6 +1016,8 @@ def LinkPrediction(
         beta_max,
         gamma_min,
         gamma_max,
+        eps_1,
+        eps_2,
         sampling=True
     )
     DNML_WND = basescore_y_and_z_wnd + pc_wnd_first + pc_wnd_second
@@ -1529,8 +1471,8 @@ if __name__ == '__main__':
     }
 
     # パラメータ
-    # burn_epochs = 800
-    burn_epochs = 5
+    burn_epochs = 800
+    # burn_epochs = 5
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     lr_beta = 0.001
@@ -1542,6 +1484,7 @@ if __name__ == '__main__':
     gamma_min = 0.1
     gamma_max = 10.0
     eps_1 = 1e-6
+    eps_2 = 1e3
     # それ以外
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -1564,9 +1507,10 @@ if __name__ == '__main__':
 
     result = pd.DataFrame()
 
-    model_n_dims = [4, 8, 16, 32, 64]
+    # model_n_dims = [4, 8, 16, 32, 64]
     # model_n_dims = [16, 32, 64]
     # model_n_dims = [64]
+    model_n_dims = [4]
 
     positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
         adj_mat=adj_mat,
@@ -1611,6 +1555,7 @@ if __name__ == '__main__':
             gamma_min=gamma_min,
             gamma_max=gamma_max,
             eps_1=eps_1,
+            eps_2=eps_2,
             device=device,
             loader_workers=16,
             shuffle=True,
@@ -1650,6 +1595,7 @@ if __name__ == '__main__':
         ret["gamma_max"] = gamma_max
         ret["gamma_min"] = gamma_min
         ret["eps_1"] = eps_1
+        ret["eps_2"] = eps_2
 
         row = pd.DataFrame(ret.values(), index=ret.keys()).T
 
@@ -1699,7 +1645,8 @@ if __name__ == '__main__':
             "beta_min",
             "gamma_max",
             "gamma_min",
-            "eps_1"
+            "eps_1",
+            "eps_2"
         ]
         )
 
