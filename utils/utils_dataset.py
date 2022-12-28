@@ -13,7 +13,6 @@ from collections import Counter
 from datetime import datetime
 from tensorboardX import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
-# from datasets import hyperbolic_geometric_graph, connection_prob, create_dataset, create_dataset_for_basescore
 from copy import deepcopy
 import torch.multiprocessing as multi
 from functools import partial

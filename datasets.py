@@ -15,6 +15,8 @@ from utils.utils import (
     exp_map,
     plot_figure
 )
+from multiprocessing import Pool
+import itertools
 
 np.random.seed(0)
 
@@ -237,46 +239,73 @@ def convert_euclid(x_polar):
     return x_euclid
 
 
-def calc_likelihood(n_nodes, n_dim, sigma, R, sigma_min, sigma_max):
-
-    x_polar = np.random.uniform(0, 1, (n_nodes))
-    # 逆関数法で点を双曲空間からサンプリング
-    # 双曲空間の意味での極座標で表示
-    val_array, cum_dens = calc_dist_r(n_dim, sigma, R)
-    for j in range(n_nodes):
-        idx = np.max(np.where(cum_dens <= x_polar[j])[0])
-        x_polar[j] = val_array[idx]
-
-    r = x_polar
-
-    print(r)
-
-    n_dim_list = [2, 4, 8, 16, 32, 64]
-
-    for d in n_dim_list:
-        sigma_list, lik, sigma_hat = calc_likelihood_list(
-            r, d, R, sigma_min, sigma_max)
-
-        print("d=", d, ":", sigma_hat)
-        print("lik=", np.min(lik))
-
-        plt.plot(sigma_list, lik, label="d=" + str(d))
-
-    plt.legend()
-    plt.savefig("test.png")
-
-
-def beta_hat_test(n_nodes, n_dim, beta, sigma, beta_min, beta_max):
-    R = np.log(n_nodes)
-
+def generate_wnd(inputs):
+    n_graph, n_dim_true, n_nodes, sigma, beta = inputs
+    p_list = {
+        "n_dim_true": n_dim_true,
+        "n_nodes": n_nodes,
+        "sigma": sigma,
+        "beta": beta
+    }
+    print(p_list)
     params_adj_mat = {
         'n_nodes': n_nodes,
-        'n_dim': n_dim,
-        'R': R,
+        'n_dim': n_dim_true,
+        'R': np.log(n_nodes),
+        'Sigma': np.eye(n_dim_true) * ((np.log(n_nodes) * sigma)**2),
+        'beta': beta
+    }
+    adj_mat, x_e = wrapped_normal_distribution(
+        n_nodes=params_adj_mat["n_nodes"],
+        n_dim=params_adj_mat["n_dim"],
+        R=params_adj_mat["R"],
+        Sigma=params_adj_mat["Sigma"],
+        beta=params_adj_mat["beta"]
+    )
+
+    positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
+        adj_mat, params_adj_mat)
+
+    print('average degree:', np.sum(adj_mat) / len(adj_mat))
+    avg_deg = np.sum(adj_mat) / len(adj_mat)
+
+    adj_mat = coo_matrix(adj_mat)
+    train_graph = coo_matrix(train_graph)
+
+    graph_dict = {
+        "params_adj_mat": params_adj_mat,
+        "adj_mat": adj_mat,
+        "positive_samples": positive_samples,
+        "negative_samples": negative_samples,
+        "train_graph": train_graph,
+        "lik_data": lik_data,
+        "x_e": x_e
+    }
+
+    os.makedirs('dataset/WND/dim_' +
+                str(params_adj_mat['n_dim']), exist_ok=True)
+    np.save('dataset/WND/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
+        params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy', graph_dict)
+
+    return inputs, avg_deg
+
+
+def generate_hgg(inputs):
+    n_graph, n_dim_true, n_nodes, sigma, beta = inputs
+    p_list = {
+        "n_dim_true": n_dim_true,
+        "n_nodes": n_nodes,
+        "sigma": sigma,
+        "beta": beta
+    }
+    print(p_list)
+    params_adj_mat = {
+        'n_nodes': n_nodes,
+        'n_dim': n_dim_true,
+        'R': np.log(n_nodes),
         'sigma': sigma,
         'beta': beta
     }
-
     adj_mat, x_e = hyperbolic_geometric_graph(
         n_nodes=params_adj_mat["n_nodes"],
         n_dim=params_adj_mat["n_dim"],
@@ -285,228 +314,102 @@ def beta_hat_test(n_nodes, n_dim, beta, sigma, beta_min, beta_max):
         beta=params_adj_mat["beta"]
     )
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-    x_e = torch.Tensor(x_e).to(device)
+    positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
+        adj_mat, params_adj_mat)
 
     print('average degree:', np.sum(adj_mat) / len(adj_mat))
+    avg_deg = np.sum(adj_mat) / len(adj_mat)
 
-    n_samples = int(n_nodes * 0.1)
+    adj_mat = coo_matrix(adj_mat)
+    train_graph = coo_matrix(train_graph)
 
-    lr = calc_beta_hat(z=x_e, train_graph=adj_mat, n_samples=n_samples,
-                       R=params_adj_mat["R"], beta_min=beta_min, beta_max=beta_max)
-    print(lr)
-
-    n_samples = int(n_nodes * 1.0)
-
-    lr = calc_beta_hat(z=x_e, train_graph=adj_mat, n_samples=n_samples,
-                       R=params_adj_mat["R"], beta_min=beta_min, beta_max=beta_max)
-    print(lr)
-
-    _, _, sigma_hat = calc_likelihood_list(
-        arcosh(x_e[:, 0].to("cpu").numpy(), use_torch=False), n_dim, R, 0.1, 10)
-
-    print(sigma_hat)
-
-
-def beta_hat__(n_nodes, n_dim, beta, sigma, beta_min, beta_max):
-    R = np.log(n_nodes)
-
-    params_adj_mat = {
-        'n_nodes': n_nodes,
-        'n_dim': n_dim,
-        'R': R,
-        'sigma': sigma,
-        'beta': beta
+    graph_dict = {
+        "params_adj_mat": params_adj_mat,
+        "adj_mat": adj_mat,
+        "positive_samples": positive_samples,
+        "negative_samples": negative_samples,
+        "train_graph": train_graph,
+        "lik_data": lik_data,
+        "x_e": x_e
     }
 
-    adj_mat, x_e = hyperbolic_geometric_graph(
-        n_nodes=params_adj_mat["n_nodes"],
-        n_dim=params_adj_mat["n_dim"],
-        R=params_adj_mat["R"],
-        sigma=params_adj_mat["sigma"],
-        beta=params_adj_mat["beta"]
-    )
+    os.makedirs('dataset/WND/dim_' +
+                str(params_adj_mat['n_dim']), exist_ok=True)
+    np.save('dataset/WND/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
+        params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy', graph_dict)
 
-    print('average degree:', np.sum(adj_mat) / len(adj_mat))
+    return inputs, avg_deg
 
-    # lorentz scalar product
-    first_term = - x_e[:, :1] * x_e[:, :1].T
-    remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
-    adj_mat_hat = - (first_term + remaining)
 
-    for i in range(n_nodes):
-        adj_mat_hat[i, i] = 1
-    # distance matrix
-    adj_mat_hat = np.arccosh(adj_mat_hat)
-    # probability matrix
-    # adj_mat_hat = connection_prob(adj_mat_hat, R, beta)
+def create_wnds(n_dim_true_list, n_nodes_list, sigma_list, beta_list):
+    n_graph_list = list(np.array(range(len(n_dim_true_list) * len(n_nodes_list)
+                                       * len(sigma_list) * len(beta_list))) % (len(sigma_list) * len(beta_list)))
 
-    for i in range(n_nodes):
-        # adj_mat_hat[i, i] = -1
-        adj_mat_hat[i, :i + 1] = -1
+    values_ = list(itertools.product(n_dim_true_list,
+                                     n_nodes_list, sigma_list, beta_list))
 
-    # print(adj_mat_hat)
-    # print(adj_mat)
+    values = []
+    for n_graph, value in zip(n_graph_list, values_):
+        values.append((n_graph, value[0], value[1], value[2], value[3]))
 
-    y = adj_mat.flatten()
-    x = adj_mat_hat.flatten()
+    print(values)
 
-    non_empty_idx = np.where(x != -1)[0]
-    y = y[non_empty_idx].reshape((-1, 1))
-    print(np.sum(y))
-    x = -(x[non_empty_idx] - R).reshape((-1, 1))
-    print(len(x))
-    # x = np.exp(x)
-    # print(empty_idx)
-    # print(len(empty_idx))
+    # multiprocessing
+    p = Pool(12)
 
-    print(y)
-    print(x)
+    results = p.map(generate_wnd, values)
 
-    lr = LogisticRegression()  # ロジスティック回帰モデルのインスタンスを作成
-    lr.fit(x, y)  # ロジスティック回帰モデルの重みを学習
+    print("----multiprocessing ended----")
+    for result in results:
+        inputs = result[0]
+        avg_deg = result[1]
+        print("n_dim_true:", inputs[1], ", n_nodes:", inputs[
+              2],  "sigma:", inputs[3],  "beta:", inputs[4])
+        print("average degree:", avg_deg)
 
-    print(lr.coef_)
+
+def create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list):
+
+    n_graph_list = list(np.array(range(len(n_dim_true_list) * len(n_nodes_list)
+                                       * len(sigma_list) * len(beta_list))) % (len(sigma_list) * len(beta_list)))
+
+    values_ = list(itertools.product(n_dim_true_list,
+                                     n_nodes_list, sigma_list, beta_list))
+
+    values = []
+    for n_graph, value in zip(n_graph_list, values_):
+        values.append((n_graph, value[0], value[1], value[2], value[3]))
+
+    print(values)
+
+    # multiprocessing
+    p = Pool(12)
+
+    results = p.map(generate_hgg, values)
+
+    print("----multiprocessing ended----")
+    for result in results:
+        inputs = result[0]
+        avg_deg = result[1]
+        print("n_dim_true:", inputs[1], ", n_nodes:", inputs[
+              2],  "sigma:", inputs[3],  "beta:", inputs[4])
+        print("average degree:", avg_deg)
 
 if __name__ == '__main__':
-
-    # R (gamma)
-    # Sigma
-    # beta
-    # adj_mat, x_e = wrapped_normal_distribution(
-    #     n_nodes=400,
-    #     n_dim=2,
-    #     R=np.log(6400),
-    #     Sigma=np.eye(2) * 10,
-    #     beta=0.8
-    # )
-    # # 平均次数が少なくなるように手で調整する用
-    # print('average degree:', np.sum(adj_mat) / len(adj_mat))
-    # plot_figure(adj_mat, x_e, "wnd_test.png")
-
-    # adj_mat, x_e = euclidean_geometric_graph(
-    #     n_nodes=400,
-    #     n_dim=2,
-    #     R=np.log(6400),
-    #     Sigma=np.eye(2) * 100,
-    #     beta=0.8
-    # )
-    # # 平均次数が少なくなるように手で調整する用
-    # print('average degree:', np.sum(adj_mat) / len(adj_mat))
-
-    # # WND
+    # WND
     # n_dim_true_list = [4, 8, 16]
-    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    n_dim_true_list = [16]
+    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    # n_nodes_list = [400, 800, 1600, 3200]
     # sigma_list = [0.5, 0.55, 0.6]
-    # beta_list = [0.6, 0.8, 1.0, 1.2]
-
-    # for n_dim_true in n_dim_true_list:
-    #     for n_nodes in n_nodes_list:
-    #         count = 0
-    #         for sigma in sigma_list:
-    #             for beta in beta_list:
-    #                 p_list = {
-    #                     "n_dim_true": n_dim_true,
-    #                     "n_nodes": n_nodes,
-    #                     "sigma": sigma,
-    #                     "beta": beta
-    #                 }
-    #                 print(p_list)
-    #                 params_adj_mat = {
-    #                     'n_nodes': n_nodes,
-    #                     'n_dim': n_dim_true,
-    #                     'R': np.log(n_nodes),
-    #                     'Sigma': np.eye(n_dim_true) * ((np.log(n_nodes) * sigma)**2),
-    #                     'beta': beta
-    #                 }
-    #                 adj_mat, x_e = wrapped_normal_distribution(
-    #                     n_nodes=params_adj_mat["n_nodes"],
-    #                     n_dim=params_adj_mat["n_dim"],
-    #                     R=params_adj_mat["R"],
-    #                     Sigma=params_adj_mat["Sigma"],
-    #                     beta=params_adj_mat["beta"]
-    #                 )
-
-    #                 positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
-    #                     adj_mat, params_adj_mat)
-
-    #                 # 平均次数が少なくなるように手で調整する用
-    #                 print('average degree:', np.sum(adj_mat) / len(adj_mat))
-
-    #                 adj_mat = coo_matrix(adj_mat)
-    #                 train_graph = coo_matrix(train_graph)
-
-    #                 graph_dict = {
-    #                     "params_adj_mat": params_adj_mat,
-    #                     "adj_mat": adj_mat,
-    #                     "positive_samples": positive_samples,
-    #                     "negative_samples": negative_samples,
-    #                     "train_graph": train_graph,
-    #                     "lik_data": lik_data,
-    #                     "x_e": x_e
-    #                 }
-
-    #                 os.makedirs('dataset/WND/dim_' +
-    #                             str(params_adj_mat['n_dim']), exist_ok=True)
-    #                 np.save('dataset/WND/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
-    #                     params_adj_mat['n_nodes']) + '_' + str(count) + '.npy', graph_dict)
-    #                 count += 1
+    sigma_list = [0.225, 0.25, 0.275]
+    beta_list = [0.5, 0.6, 0.7, 0.8]
+    create_wnds(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
 
     # HGG
-    n_dim_true_list = [4, 8, 16]
+    # n_dim_true_list = [4, 8, 16]
+    n_dim_true_list = [16]
     n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
     sigma_list = [0.5, 1.0, 2.0]
-    beta_list = [0.6, 0.8, 1.0, 1.2]
-
-    for n_dim_true in n_dim_true_list:
-        for n_nodes in n_nodes_list:
-            count = 0
-            for sigma in sigma_list:
-                for beta in beta_list:
-                    p_list = {
-                        "n_dim_true": n_dim_true,
-                        "n_nodes": n_nodes,
-                        "sigma": sigma,
-                        "beta": beta
-                    }
-                    print(p_list)
-                    params_adj_mat = {
-                        'n_nodes': n_nodes,
-                        'n_dim': n_dim_true,
-                        'R': np.log(n_nodes),
-                        'sigma': sigma,
-                        'beta': beta
-                    }
-                    adj_mat, x_e = hyperbolic_geometric_graph(
-                        n_nodes=params_adj_mat["n_nodes"],
-                        n_dim=params_adj_mat["n_dim"],
-                        R=params_adj_mat["R"],
-                        sigma=params_adj_mat["sigma"],
-                        beta=params_adj_mat["beta"]
-                    )
-
-                    positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
-                        adj_mat, params_adj_mat)
-
-                    # 平均次数が少なくなるように手で調整する用
-                    print('average degree:', np.sum(adj_mat) / len(adj_mat))
-
-                    adj_mat = coo_matrix(adj_mat)
-                    train_graph = coo_matrix(train_graph)
-
-                    graph_dict = {
-                        "params_adj_mat": params_adj_mat,
-                        "adj_mat": adj_mat,
-                        "positive_samples": positive_samples,
-                        "negative_samples": negative_samples,
-                        "train_graph": train_graph,
-                        "lik_data": lik_data,
-                        "x_e": x_e
-                    }
-
-                    os.makedirs('dataset/dim_' +
-                                str(params_adj_mat['n_dim']), exist_ok=True)
-                    np.save('dataset/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
-                        params_adj_mat['n_nodes']) + '_' + str(count) + '.npy', graph_dict)
-                    count += 1
+    beta_list = [0.5, 0.6, 0.7, 0.8, 0.8]
+    create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
