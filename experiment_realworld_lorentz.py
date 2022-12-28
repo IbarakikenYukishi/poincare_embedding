@@ -8,7 +8,8 @@ import gc
 import time
 from copy import deepcopy
 from torch.utils.data import DataLoader
-from lorentz import CV_HGG, DNML_HGG, LinkPrediction, create_test_for_link_prediction
+from lorentz import LinkPrediction
+from utils.utils_dataset import create_test_for_link_prediction
 import torch.multiprocessing as multi
 from functools import partial
 from scipy.io import mmread
@@ -56,6 +57,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     gamma_min = 0.1
     gamma_max = 10.0
     eps_1 = 1e-6
+    eps_2 = 1e3
     # それ以外
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -70,7 +72,6 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     result = pd.DataFrame()
 
     ret = LinkPrediction(
-        adj_mat=adj_mat,
         train_graph=train_graph,
         positive_samples=positive_samples,
         negative_samples=negative_samples,
@@ -86,7 +87,6 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         lr_epoch_10=lr_epoch_10,
         lr_beta=lr_beta,
         lr_gamma=lr_gamma,
-        # lr_sigma=lr_sigma,
         sigma_min=sigma_min,
         sigma_max=sigma_max,
         beta_min=beta_min,
@@ -94,11 +94,16 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         gamma_min=gamma_min,
         gamma_max=gamma_max,
         eps_1=eps_1,
+        eps_2=eps_2,
         device=device,
+        calc_HGG=True,
+        calc_WND=True,
+        calc_naive=True,
+        calc_othermetrics=True,
+        calc_groundtruth=False,
         loader_workers=16,
         shuffle=True,
-        sparse=False,
-        calc_groundtruth=False
+        sparse=False
     )
     torch.save(ret["model_hgg"], RESULTS + "/" + dataset_name +
                "/result_" + str(model_n_dim) + "_hgg.pth")
@@ -132,6 +137,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     ret["gamma_max"] = gamma_max
     ret["gamma_min"] = gamma_min
     ret["eps_1"] = eps_1
+    ret["eps_2"] = eps_2
 
     row = pd.DataFrame(ret.values(), index=ret.keys()).T
 
@@ -181,7 +187,8 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         "beta_min",
         "gamma_max",
         "gamma_min",
-        "eps_1"
+        "eps_1",
+        "eps_2"
     ]
     )
 
