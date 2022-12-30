@@ -798,12 +798,15 @@ def LinkPrediction(
         losses_naive = []
 
         # MLE
-        print("HGG MLE")
-        model_hgg.params_mle()
-        print("WND MLE")
-        model_wnd.params_mle()
-        print("Naive MLE")
-        model_naive.params_mle()
+        if calc_HGG:  # DNML-HGG
+            print("HGG MLE")
+            model_hgg.params_mle()
+        if calc_WND:  # DNML-WND
+            print("WND MLE")
+            model_wnd.params_mle()
+        if calc_naive:  # Naive model
+            print("Naive MLE")
+            model_naive.params_mle()
 
         for pairs, labels in dataloader:
             pairs = pairs.reshape((-1, 2))
@@ -833,11 +836,12 @@ def LinkPrediction(
                 rsgd_naive.step()
                 losses_naive.append(loss_naive)
 
+        print("epoch:", epoch)
         if calc_HGG:  # DNML-HGG
-            print("epoch:", epoch, ", loss_hgg:",
+            print("loss_hgg:",
                   torch.Tensor(losses_hgg).mean().item())
         if calc_WND:  # DNML-WND
-            print("epoch:", epoch, ", loss_wnd:",
+            print("loss_wnd:",
                   torch.Tensor(losses_wnd).mean().item())
         if calc_naive:  # Naive model
             print("loss_naive:",

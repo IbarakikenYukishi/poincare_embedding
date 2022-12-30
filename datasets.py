@@ -333,9 +333,9 @@ def generate_hgg(inputs):
         "x_e": x_e
     }
 
-    os.makedirs('dataset/WND/dim_' +
+    os.makedirs('dataset/HGG/dim_' +
                 str(params_adj_mat['n_dim']), exist_ok=True)
-    np.save('dataset/WND/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
+    np.save('dataset/HGG/dim_' + str(params_adj_mat['n_dim']) + '/graph_' + str(
         params_adj_mat['n_nodes']) + '_' + str(n_graph) + '.npy', graph_dict)
 
     return inputs, avg_deg
