@@ -1,11 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-from scipy import integrate
-# from embed import create_dataset
-from copy import deepcopy
+import itertools
 import pandas as pd
+from scipy import integrate
+from copy import deepcopy
 from scipy.sparse import csr_matrix, csc_matrix, coo_matrix, lil_matrix
+from multiprocessing import Pool
+from functools import partial
 
 RESULTS = "results"
 
@@ -110,37 +112,51 @@ def calc_GE(dim_true, n_dim, n_nodes, n_graph, weight_entropy):
     return H_f + weight_entropy * H_s
 
 
-def artificial_dataset(dim_true):
-    weight_entropy = 1.0
-    # dim_true = 16
-    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    n_nodes_list = [12800]
+def calc_artificial(inputs, n_dim_list, weight_entropy):
+    print(inputs)
+    dataset, dim_true, n_nodes, n_graph = inputs
+    result = pd.DataFrame()
+    entropy_list = []
+    for n_dim in n_dim_list:
+        entropy_list.append(
+            calc_GE(dim_true, n_dim, n_nodes, n_graph, weight_entropy))
+    entropy_list = np.array(entropy_list)
+    result["model_n_dims"] = n_dim_list
+    result["MinGE"] = entropy_list
 
-    n_graphs = 12
+    os.makedirs(RESULTS + "/" + dataset + "/dim_" +
+                str(dim_true) + "/", exist_ok=True)
+    result.to_csv(RESULTS + "/" + dataset + "/dim_" + str(dim_true) + "/result_" + str(n_nodes) +
+                  "_" + str(n_graph) + "_MinGE.csv", index=False)
+    print("estimated dimensionality:",
+          n_dim_list[np.argmin(np.abs(entropy_list))])
 
-    if dim_true == 4:
-        n_dim_list = [2, 4, 8, 16, 32, 64]
-    elif dim_true == 8:
-        n_dim_list = [2, 4, 8, 16, 32, 64]
-    elif dim_true == 16:
-        n_dim_list = [2, 4, 8, 16, 32, 64]
 
-    for n_nodes in n_nodes_list:
-        print(n_nodes)
-        for n_graph in range(n_graphs):
-            result = pd.DataFrame()
-            entropy_list = []
-            for n_dim in n_dim_list:
-                entropy_list.append(
-                    calc_GE(dim_true, n_dim, n_nodes, n_graph, weight_entropy))
-            entropy_list = np.array(entropy_list)
-            result["model_n_dims"] = n_dim_list
-            result["MinGE"] = entropy_list
-            result.to_csv(RESULTS + "/dim_" + str(dim_true) + "/result_" + str(n_nodes) +
-                          "_" + str(n_graph) + "_MinGE.csv", index=False)
-            print("estimated dimensionality:",
-                  n_dim_list[np.argmin(entropy_list)])
+def artificial_dataset(
+    dataset_list,
+    n_dim_true_list,
+    n_nodes_list,
+    n_dim_list,
+    n_graphs,
+    weight_entropy
+):
+    values = list(itertools.product(
+        dataset_list,
+        n_dim_true_list,
+        n_nodes_list,
+        range(n_graphs)
+    ))
 
+    calc_artificial_ = partial(
+        calc_artificial,
+        n_dim_list=n_dim_list,
+        weight_entropy=weight_entropy
+    )
+
+    # multiprocessing
+    p = Pool(12)
+
+    results = p.map(calc_artificial_, values)
 
 def calc_GE_lexical(n_dim, weight_entropy, dataset_name):
     data = np.load("dataset/wn_dataset/" + dataset_name +
@@ -200,12 +216,22 @@ def lexical_dataset(n_dim_list, dataset_name):
           n_dim_list[np.argmin(entropy_list)])
 
 if __name__ == "__main__":
+    # artificial dataset
+    print("Results of Artificial Datasets")
+    n_dim_true_list = [16]
+    dataset_list = ["HGG", "WND"]
+    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    n_dim_list = [2, 4, 8, 16, 32, 64]
+    n_graphs = 12
     weight_entropy = 1.0
-
-    # # artificial dataset
-    # n_dim_true_list = [4, 8, 16]
-    # for n_dim_true in n_dim_true_list:
-    #     artificial_dataset(n_dim_true)
+    artificial_dataset(
+        dataset_list=dataset_list,
+        n_dim_true_list=n_dim_true_list,
+        n_nodes_list=n_nodes_list,
+        n_dim_list=n_dim_list,
+        n_graphs=n_graphs,
+        weight_entropy=weight_entropy
+    )
 
     # # link prediction
     # n_dim_list = [2, 4, 8, 16, 32, 64]
@@ -223,16 +249,15 @@ if __name__ == "__main__":
     #                   "/result_MinGE.csv", index=False)
 
     # lexical dataset
-    # n_dim_list = [2, 4, 8, 16, 32, 64]
-    n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
-    dataset_name_list = [
-        "animal",
-        "group",
-        "mammal",
-        "solid",
-        "tree",
-        "verb",
-        "worker"
-    ]
-    for dataset_name in dataset_name_list:
-        lexical_dataset(n_dim_list, dataset_name)
+    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
+    # dataset_name_list = [
+    #     "animal",
+    #     "group",
+    #     "mammal",
+    #     "solid",
+    #     "tree",
+    #     "verb",
+    #     "worker"
+    # ]
+    # for dataset_name in dataset_name_list:
+    #     lexical_dataset(n_dim_list, dataset_name)
