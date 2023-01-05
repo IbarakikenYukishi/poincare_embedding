@@ -22,8 +22,11 @@ def integral_sin(n, theta):
 
 
 def calc_GE_realworld(dataset_name, n_dim_list, weight_entropy):
-    adj_mat = np.load('dataset/' + dataset_name + '/' + dataset_name + '.npy')
-    n_nodes = len(adj_mat)
+    data = np.load('dataset/' + dataset_name +
+                   '/data.npy', allow_pickle=True).item()
+    adj_mat = data["adj_mat"]
+
+    n_nodes = adj_mat.shape[0]
     print(n_nodes)
 
     params_dataset = {
@@ -132,7 +135,7 @@ def calc_artificial(inputs, n_dim_list, weight_entropy):
           n_dim_list[np.argmin(np.abs(entropy_list))])
 
 
-def artificial_dataset(
+def MinGE_artificial_dataset(
     dataset_list,
     n_dim_true_list,
     n_nodes_list,
@@ -157,6 +160,7 @@ def artificial_dataset(
     p = Pool(12)
 
     results = p.map(calc_artificial_, values)
+
 
 def calc_GE_lexical(n_dim, weight_entropy, dataset_name):
     data = np.load("dataset/wn_dataset/" + dataset_name +
@@ -198,7 +202,7 @@ def calc_GE_lexical(n_dim, weight_entropy, dataset_name):
     return H_f + weight_entropy * H_s
 
 
-def lexical_dataset(n_dim_list, dataset_name):
+def lexical_dataset(dataset_name, n_dim_list):
     print(dataset_name)
     weight_entropy = 1.0
 
@@ -210,21 +214,67 @@ def lexical_dataset(n_dim_list, dataset_name):
     entropy_list = np.array(entropy_list)
     result["model_n_dims"] = n_dim_list
     result["MinGE"] = entropy_list
+
+    os.makedirs(RESULTS + "/" + dataset_name + "/", exist_ok=True)
     result.to_csv(RESULTS + "/" + dataset_name +
                   "/result_MinGE.csv", index=False)
     print("estimated dimensionality:",
           n_dim_list[np.argmin(entropy_list)])
 
+
+def calc_link_prediction(
+    dataset_name,
+    n_dim_list,
+    weight_entropy
+):
+    result = pd.DataFrame()
+    entropy_list = calc_GE_realworld(
+        dataset_name, n_dim_list, weight_entropy)
+
+    result["model_n_dims"] = n_dim_list
+    result["MinGE"] = entropy_list
+
+    result.to_csv(RESULTS + "/" + dataset_name +
+                  "/result_MinGE.csv", index=False)
+
+
+def MinGE_link_prediction(
+    dataset_name_list,
+    n_dim_list,
+    weight_entropy
+):
+    calc_link_prediction_ = partial(
+        calc_link_prediction,
+        n_dim_list=n_dim_list,
+        weight_entropy=weight_entropy
+    )
+
+    # multiprocessing
+    p = Pool(12)
+
+    results = p.map(calc_link_prediction_, dataset_name_list)
+
+
+def MinGE_lexical_dataset(
+    dataset_name_list,
+    n_dim_list
+):
+    lexical_dataset_ = partial(lexical_dataset, n_dim_list=n_dim_list)
+    # multiprocessing
+    p = Pool(12)
+    results = p.map(lexical_dataset_, dataset_name_list)
+
+
 if __name__ == "__main__":
     # artificial dataset
-    print("Results of Artificial Datasets")
+    print("Artificial Datasets")
     n_dim_true_list = [16]
     dataset_list = ["HGG", "WND"]
     n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
     n_dim_list = [2, 4, 8, 16, 32, 64]
     n_graphs = 12
     weight_entropy = 1.0
-    artificial_dataset(
+    MinGE_artificial_dataset(
         dataset_list=dataset_list,
         n_dim_true_list=n_dim_true_list,
         n_nodes_list=n_nodes_list,
@@ -233,31 +283,30 @@ if __name__ == "__main__":
         weight_entropy=weight_entropy
     )
 
-    # # link prediction
-    # n_dim_list = [2, 4, 8, 16, 32, 64]
-    # dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
-
-    # for dataset_name in dataset_name_list:
-    #     result = pd.DataFrame()
-    #     entropy_list = calc_GE_realworld(
-    #         dataset_name, n_dim_list, weight_entropy)
-
-    #     result["model_n_dims"] = n_dim_list
-    #     result["MinGE"] = entropy_list
-
-    #     result.to_csv(RESULTS + "/" + dataset_name +
-    #                   "/result_MinGE.csv", index=False)
+    # link prediction
+    print("Link Prediction")
+    n_dim_list = [2, 4, 8, 16, 32, 64]
+    weight_entropy = 1.0
+    dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
+    MinGE_link_prediction(
+        dataset_name_list=dataset_name_list,
+        n_dim_list=n_dim_list,
+        weight_entropy=weight_entropy
+    )
 
     # lexical dataset
-    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
-    # dataset_name_list = [
-    #     "animal",
-    #     "group",
-    #     "mammal",
-    #     "solid",
-    #     "tree",
-    #     "verb",
-    #     "worker"
-    # ]
-    # for dataset_name in dataset_name_list:
-    #     lexical_dataset(n_dim_list, dataset_name)
+    print("Lexical Dataset")
+    n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
+    dataset_name_list = [
+        "animal",
+        "group",
+        "mammal",
+        "solid",
+        "tree",
+        "verb",
+        "worker"
+    ]
+    MinGE_lexical_dataset(
+        dataset_name_list=dataset_name_list,
+        n_dim_list=n_dim_list
+    )
