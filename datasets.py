@@ -128,9 +128,9 @@ def hyperbolic_geometric_graph(n_nodes, n_dim, R, sigma, beta):
 
     adj_mat = np.where(sampling_mat < adj_mat, 1, 0)
 
-    print(adj_mat)
+    # print(adj_mat)
 
-    print("adj mat generated")
+    # print("adj mat generated")
 
     return adj_mat, x_e
 
@@ -170,9 +170,9 @@ def wrapped_normal_distribution(n_nodes, n_dim, R, Sigma, beta):
 
     adj_mat = np.where(sampling_mat < adj_mat, 1, 0)
 
-    print(adj_mat)
+    # print(adj_mat)
 
-    print("adj mat generated")
+    # print("adj mat generated")
 
     return adj_mat, x_e
 
@@ -317,7 +317,7 @@ def generate_hgg(inputs):
     positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
         adj_mat, params_adj_mat)
 
-    print('average degree:', np.sum(adj_mat) / len(adj_mat))
+    print('average degree:', np.sum(adj_mat) / len(adj_mat), p_list)
     avg_deg = np.sum(adj_mat) / len(adj_mat)
 
     adj_mat = coo_matrix(adj_mat)
@@ -344,6 +344,16 @@ def generate_hgg(inputs):
 def create_wnds(n_dim_true_list, n_nodes_list, sigma_list, beta_list):
     n_graph_list = list(np.array(range(len(n_dim_true_list) * len(n_nodes_list)
                                        * len(sigma_list) * len(beta_list))) % (len(sigma_list) * len(beta_list)))
+
+    # values_ = []
+
+    # for i, n_dim_true in enumerate(n_dim_true_list):
+    #     values_n_dim_true = itertools.product(
+    #         n_nodes_list, sigma_list[i], beta_list[i])
+
+    #     for tuple_value in values_n_dim_true:
+    #         v = (n_dim_true, tuple_value[0], tuple_value[1], tuple_value[2])
+    #         values_.append(v)
 
     values_ = list(itertools.product(n_dim_true_list,
                                      n_nodes_list, sigma_list, beta_list))
@@ -397,19 +407,39 @@ def create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list):
 
 if __name__ == '__main__':
     # WND
-    # n_dim_true_list = [4, 8, 16]
-    n_dim_true_list = [16]
-    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    # n_nodes_list = [400, 800, 1600, 3200]
-    # sigma_list = [0.5, 0.55, 0.6]
-    sigma_list = [0.225, 0.25, 0.275]
+    # true dim 16
+    n_dim_true_list = [8]
+    sigma_list = [0.35, 0.375, 0.40]
     beta_list = [0.5, 0.6, 0.7, 0.8]
+    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
     create_wnds(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
 
+    # # true dim 16
+    # n_dim_true_list = [16]
+    # sigma_list = [0.225, 0.25, 0.275]
+    # beta_list = [0.5, 0.6, 0.7, 0.8]
+    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    # create_wnds(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
+
     # HGG
-    # n_dim_true_list = [4, 8, 16]
-    n_dim_true_list = [16]
-    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    sigma_list = [0.5, 1.0, 2.0]
-    beta_list = [0.5, 0.6, 0.7, 0.8, 0.8]
-    create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
+
+    # true dim 4
+    # n_dim_true_list = [4]
+    # sigma_list = [0.5, 1.0, 2.0]
+    # beta_list = [0.5, 0.6, 0.7, 0.8]
+    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    # create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
+
+    # true dim 8
+    # n_dim_true_list = [8]
+    # sigma_list = [0.5, 1.0, 2.0]
+    # beta_list = [0.5, 0.6, 0.7, 0.8]
+    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    # create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
+
+    # # true dim 16
+    # n_dim_true_list = [16]
+    # sigma_list = [0.5, 1.0, 2.0]
+    # beta_list = [0.5, 0.6, 0.7, 0.8]
+    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    # create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
