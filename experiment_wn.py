@@ -63,7 +63,7 @@ def create_wn_dataset(dataset_name):
     np.save("dataset/wn_dataset/" + dataset_name + "_data.npy", data)
 
 
-def is_a_score(is_a, n_dim, lorentz_table, alpha=1000, print_stats=False):
+def is_a_score(is_a, n_dim, lorentz_table, alpha=1000, print_stats=False, print_is_a_score=False):
     if print_stats:
         r = arcosh(torch.Tensor(lorentz_table[:, 0]))
         torch.set_printoptions(edgeitems=1000)
@@ -79,13 +79,13 @@ def is_a_score(is_a, n_dim, lorentz_table, alpha=1000, print_stats=False):
         r_v = arcosh(c_v[0])
         dst = h_dist(c_u.reshape((1, -1)), c_v.reshape((1, -1)))
         score = -(1 + alpha * (r_v - r_u)) * dst
-        # print(score)
         score_sum += score[0]
         pass
 
-    print("Dim ", n_dim, ": ", score_sum / len(is_a))
-    print("nodes:", len(lorentz_table))
-    print("is-a:", len(is_a))
+    if print_is_a_score:
+        print("Dim ", n_dim, ": ", score_sum / len(is_a))
+        print("nodes:", len(lorentz_table))
+        print("is-a:", len(is_a))
 
     return score_sum / len(is_a)
 
@@ -121,7 +121,10 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     n_max_negatives = n_max_positives * 10
     lr_embeddings = 0.1
-    lr_epoch_10 = 10.0 * \
+    # lr_epoch_10 = 10.0 * \
+    #     (burn_batch_size * (n_max_positives + n_max_negatives)) / \
+    #     32 / 100  # batchサイズに対応して学習率変更
+    lr_epoch_10 = 1.0 * \
         (burn_batch_size * (n_max_positives + n_max_negatives)) / \
         32 / 100  # batchサイズに対応して学習率変更
     lr_beta = 0.001
@@ -134,6 +137,7 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     gamma_max = 10.0
     eps_1 = 1e-6
     eps_2 = 1e3
+    init_range = 0.001
     # others
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -171,6 +175,7 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
         gamma_max=gamma_max,
         eps_1=eps_1,
         eps_2=eps_2,
+        init_range=init_range,
         device=device,
         calc_HGG=True,
         calc_WND=True,
@@ -223,6 +228,7 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     ret["gamma_min"] = gamma_min
     ret["eps_1"] = eps_1
     ret["eps_2"] = eps_2
+    ret["init_range"] = init_range
 
     row = pd.DataFrame(ret.values(), index=ret.keys()).T
 
@@ -269,7 +275,8 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
         "gamma_max",
         "gamma_min",
         "eps_1",
-        "eps_2"
+        "eps_2",
+        "init_range"
     ]
     )
 
