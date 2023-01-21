@@ -74,20 +74,31 @@ def calc_GE_realworld(dataset_name, n_dim_list, weight_entropy):
     return GE_list
 
 
-def calc_GE(dim_true, n_dim, n_nodes, n_graph, weight_entropy):
-    dataset = np.load('dataset/dim_' + str(dim_true) + '/graph_' + str(n_nodes) + '_' + str(n_graph) +
+def calc_GE(dataset, dim_true, n_dim, n_nodes, n_graph, weight_entropy):
+    dataset = np.load('dataset/' + dataset + '/dim_' + str(dim_true) + '/graph_' + str(n_nodes) + '_' + str(n_graph) +
                       '.npy', allow_pickle='TRUE').item()  # object型なので、itemを付けないと辞書として使えない。
     adj_mat = dataset["adj_mat"]
     params_dataset = dataset["params_adj_mat"]
 
     N = params_dataset["n_nodes"]
+
+    N_limit = min(N, 3200)
+    if N > N_limit:
+        idx = np.array(range(N))
+        idx = np.random.permutation(
+            idx)[:N_limit]
+        adj_mat = adj_mat.toarray()
+        adj_mat = adj_mat[idx, :][:, idx]
+        # print(adj_mat.shape)
+
     # Structure Entropy
     D = np.sum(adj_mat, axis=0) + 1
+
     adj_mat_2 = coo_matrix(adj_mat) * \
         coo_matrix(adj_mat).toarray().astype(np.float)
 
     t = np.sum(adj_mat_2, axis=1).astype(np.float)
-    for i in range(N):
+    for i in range(N_limit):
         if t[i] != 0:
             adj_mat_2[i, :] /= t[i]
 
@@ -111,6 +122,7 @@ def calc_GE(dim_true, n_dim, n_nodes, n_graph, weight_entropy):
         theta) * (np.sin(theta)**(n_dim - 2)) / integral_sin(n_dim - 2, np.pi)
     term_2 = integrate.quad(term_2_, 0, np.pi)[0] / term_1
     H_f -= term_2
+    # print("entropy:", H_f + weight_entropy * H_s)
 
     return H_f + weight_entropy * H_s
 
@@ -122,7 +134,7 @@ def calc_artificial(inputs, n_dim_list, weight_entropy):
     entropy_list = []
     for n_dim in n_dim_list:
         entropy_list.append(
-            calc_GE(dim_true, n_dim, n_nodes, n_graph, weight_entropy))
+            calc_GE(dataset, dim_true, n_dim, n_nodes, n_graph, weight_entropy))
     entropy_list = np.array(entropy_list)
     result["model_n_dims"] = n_dim_list
     result["MinGE"] = entropy_list
@@ -268,10 +280,13 @@ def MinGE_lexical_dataset(
 if __name__ == "__main__":
     # artificial dataset
     print("Artificial Datasets")
-    n_dim_true_list = [16]
+    # n_dim_true_list = [16]
+    n_dim_true_list = [8, 16]
     dataset_list = ["HGG", "WND"]
+    # dataset_list = ["HGG"]
     n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    n_dim_list = [2, 4, 8, 16, 32, 64]
+    # n_dim_list = [2, 4, 8, 16, 32, 64]
+    n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
     n_graphs = 12
     weight_entropy = 1.0
     MinGE_artificial_dataset(
@@ -283,30 +298,30 @@ if __name__ == "__main__":
         weight_entropy=weight_entropy
     )
 
-    # link prediction
-    print("Link Prediction")
-    n_dim_list = [2, 4, 8, 16, 32, 64]
-    weight_entropy = 1.0
-    dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
-    MinGE_link_prediction(
-        dataset_name_list=dataset_name_list,
-        n_dim_list=n_dim_list,
-        weight_entropy=weight_entropy
-    )
+    # # link prediction
+    # print("Link Prediction")
+    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
+    # weight_entropy = 1.0
+    # dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
+    # MinGE_link_prediction(
+    #     dataset_name_list=dataset_name_list,
+    #     n_dim_list=n_dim_list,
+    #     weight_entropy=weight_entropy
+    # )
 
-    # lexical dataset
-    print("Lexical Dataset")
-    n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
-    dataset_name_list = [
-        "animal",
-        "group",
-        "mammal",
-        "solid",
-        "tree",
-        "verb",
-        "worker"
-    ]
-    MinGE_lexical_dataset(
-        dataset_name_list=dataset_name_list,
-        n_dim_list=n_dim_list
-    )
+    # # lexical dataset
+    # print("Lexical Dataset")
+    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
+    # dataset_name_list = [
+    #     "animal",
+    #     "group",
+    #     "mammal",
+    #     "solid",
+    #     "tree",
+    #     "verb",
+    #     "worker"
+    # ]
+    # MinGE_lexical_dataset(
+    #     dataset_name_list=dataset_name_list,
+    #     n_dim_list=n_dim_list
+    # )
