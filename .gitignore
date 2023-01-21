@@ -3,6 +3,7 @@ results/
 *.png
 *.csv
 ._*
+*.gif
 
 .DS_Store
 *.pickle
