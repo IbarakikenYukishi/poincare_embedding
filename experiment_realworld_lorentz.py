@@ -58,6 +58,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     gamma_max = 10.0
     eps_1 = 1e-6
     eps_2 = 1e3
+    init_range = 0.001
     # それ以外
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -95,6 +96,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         gamma_max=gamma_max,
         eps_1=eps_1,
         eps_2=eps_2,
+        init_range=init_range,
         device=device,
         calc_HGG=True,
         calc_WND=True,
@@ -138,6 +140,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     ret["gamma_min"] = gamma_min
     ret["eps_1"] = eps_1
     ret["eps_2"] = eps_2
+    ret["init_range"] = init_range
 
     row = pd.DataFrame(ret.values(), index=ret.keys()).T
 
@@ -188,7 +191,8 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         "gamma_max",
         "gamma_min",
         "eps_1",
-        "eps_2"
+        "eps_2",
+        "init_range"
     ]
     )
 
