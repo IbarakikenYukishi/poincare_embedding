@@ -76,6 +76,7 @@ class RSGD_Lorentz(optim.Optimizer):
         beta_min,
         gamma_max,
         gamma_min,
+        perturbation,
         device
     ):
         defaults = {
@@ -87,6 +88,7 @@ class RSGD_Lorentz(optim.Optimizer):
             "beta_min": beta_min,
             "gamma_max": gamma_max,
             "gamma_min": gamma_min,
+            "perturbation": perturbation,
             "device": device
         }
         super().__init__(params, defaults=defaults)
@@ -117,6 +119,8 @@ class RSGD_Lorentz(optim.Optimizer):
                 # print("p.grad:", p.grad)
                 if p.grad is None:
                     continue
+                # print(p.grad)
+
                 B, D = p.size()
                 gl = torch.eye(D, device=p.device, dtype=p.dtype)
                 gl[0, 0] = -1
@@ -133,11 +137,21 @@ class RSGD_Lorentz(optim.Optimizer):
                     * p
                 )
                 update = exp_map(p, -group["lr_embeddings"] * proj)
+                # print(update)
                 is_nan_inf = torch.isnan(update) | torch.isinf(update)
                 update = torch.where(is_nan_inf, p, update)
                 update = set_dim0(update, group["R"] * 1.00)
 
                 p.data.copy_(update)
+
+
+                if group["perturbation"]:
+                    r = arcosh(p[:, 0]).double()
+                    r = torch.where(r <= 1e-5)
+                    # print(r)
+                    perturbation = torch.normal(
+                        0.0, 0.0001, size=(len(r), D)).to(p.device)
+                    p.data.copy_(set_dim0(p + perturbation, group["R"] * 1.00))
 
 
 class Lorentz(nn.Module):
@@ -170,6 +184,12 @@ class Lorentz(nn.Module):
     ):
         pass
 
+    def set_embedding(
+        self,
+        table
+    ):
+        self.table.weight.data = table
+
     def forward(
         self,
         pairs,
@@ -192,13 +212,6 @@ class Lorentz(nn.Module):
             loss = loss + (lik_us + lik_vs) / (self.n_nodes - 1)
 
         return loss
-
-    # def lik_y_given_z(
-    #     self,
-    #     pairs,
-    #     labels
-    # ):
-    #     pass
 
     def lik_y_given_z(
         self,
@@ -319,10 +332,11 @@ class PseudoUniform(Lorentz):
 
         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
 
-        self.table.weight.data = torch.Tensor(
-            init_HGG(n_nodes, n_dim, R, sigma, beta))
+        # self.table.weight.data = torch.Tensor(
+        #     init_HGG(n_nodes, n_dim, R, sigma, beta))
 
         # nn.init.normal(self.table.weight, 0, init_range)
+        nn.init.uniform(self.table.weight, -init_range, init_range)
 
         # 0次元目をセット
         with torch.no_grad():
@@ -338,7 +352,7 @@ class PseudoUniform(Lorentz):
         sigma_list, ret, sigma_hat = calc_likelihood_list(
             r, n_dim=self.n_dim, R=self.R, sigma_min=self.sigma_min, sigma_max=self.sigma_max, DIV=1000)
 
-        print(r)
+        # print(r)
 
         self.sigma = sigma_hat
         print("sigma:", self.sigma)
@@ -519,18 +533,19 @@ class WrappedNormal(Lorentz):
 
         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
 
-        v = np.random.multivariate_normal(
-            np.zeros(self.n_dim), self.Sigma.cpu().numpy(), size=self.n_nodes)
-        v_ = np.zeros((self.n_nodes, self.n_dim + 1))
-        v_[:, 1:] = v  # tangent vector
+        # v = np.random.multivariate_normal(
+        #     np.zeros(self.n_dim), self.Sigma.cpu().numpy(), size=self.n_nodes)
+        # v_ = np.zeros((self.n_nodes, self.n_dim + 1))
+        # v_[:, 1:] = v  # tangent vector
 
-        mean = np.zeros((self.n_nodes, self.n_dim + 1))
-        mean[:, 0] = 1
-        x_e = exp_map(torch.tensor(mean), torch.tensor(v_)).numpy()
+        # mean = np.zeros((self.n_nodes, self.n_dim + 1))
+        # mean[:, 0] = 1
+        # x_e = exp_map(torch.tensor(mean), torch.tensor(v_)).numpy()
 
-        self.table.weight.data = torch.Tensor(x_e)
+        # self.table.weight.data = torch.Tensor(x_e)
 
         # nn.init.normal(self.table.weight, 0, init_range)
+        nn.init.uniform(self.table.weight, -init_range, init_range)
 
         # 0次元目をセット
         with torch.no_grad():
@@ -653,6 +668,310 @@ class WrappedNormal(Lorentz):
         return ret_1, ret_2
 
 
+def calc_criteria(
+    model_latent,
+    model_naive,
+    train_graph,
+    positive_samples,
+    negative_samples,
+    lik_data,
+    x_lorentz,
+    params_dataset,
+    model_n_dim,
+    burn_epochs,
+    burn_batch_size,
+    n_max_positives,
+    n_max_negatives,
+    lr_embeddings,
+    lr_epoch_10,
+    lr_beta,
+    lr_gamma,
+    sigma_min,
+    sigma_max,
+    beta_min,
+    beta_max,
+    gamma_min,
+    gamma_max,
+    eps_1,
+    eps_2,
+    init_range,
+    device,
+    calc_HGG=True,
+    calc_WND=True,
+    calc_naive=True,
+    calc_othermetrics=True,
+    calc_groundtruth=False,
+    loader_workers=16,
+    shuffle=True,
+    sparse=False
+):
+
+    # model
+    if (calc_HGG and calc_WND) or (not calc_HGG and not calc_WND):
+        raise ValueError("Either calc_HGG or calc_WND should be false.")
+    elif calc_HGG:
+        model_hgg = model_latent
+        model_wnd = WrappedNormal(
+            n_nodes=params_dataset['n_nodes'],
+            n_dim=model_n_dim,  # モデルの次元
+            R=params_dataset['R'],
+            Sigma=torch.eye(model_n_dim) * 10,
+            beta=1.0,
+            gamma=params_dataset['R'],
+            init_range=init_range,
+            sparse=sparse,
+            device=device,
+            calc_latent=True
+        )
+    elif calc_WND:
+        model_wnd = model_latent
+        model_hgg = PseudoUniform(
+            n_nodes=params_dataset['n_nodes'],
+            n_dim=model_n_dim,  # モデルの次元
+            R=params_dataset['R'],
+            sigma=1.0,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            beta=1.0,
+            gamma=params_dataset['R'],
+            init_range=init_range,
+            sparse=sparse,
+            device=device,
+            calc_latent=True
+        )
+
+    model_hgg.to(device)
+    model_wnd.to(device)
+    model_naive.to(device)
+
+    # サンプリングしたデータのみで尤度を計算する。
+    dataloader_all = DataLoader(
+        Graph(lik_data),
+        shuffle=shuffle,
+        batch_size=burn_batch_size * (n_max_negatives + n_max_positives) * 10,
+        num_workers=loader_workers,
+        pin_memory=True
+    )
+
+    # 尤度計算
+    basescore_y_given_z_hgg = 0
+    basescore_y_given_z_wnd = 0
+    basescore_y_given_z_naive = 0
+    for pairs, labels in dataloader_all:
+        pairs = pairs.to(device)
+        labels = labels.to(device)
+
+        basescore_y_given_z_hgg += model_hgg.lik_y_given_z(
+            pairs, labels).sum().item()
+        basescore_y_given_z_wnd += model_wnd.lik_y_given_z(
+            pairs, labels).sum().item()
+        basescore_y_given_z_naive += model_naive.lik_y_given_z(
+            pairs, labels).sum().item()
+
+    basescore_z_hgg = model_hgg.z()
+    basescore_z_wnd = model_wnd.z()
+
+    # the number of true data
+    n_data = params_dataset['n_nodes'] * (params_dataset['n_nodes'] - 1) / 2
+
+    basescore_y_given_z_hgg = basescore_y_given_z_hgg * \
+        (n_data / len(lik_data))
+    basescore_y_given_z_wnd = basescore_y_given_z_wnd * \
+        (n_data / len(lik_data))
+    basescore_y_given_z_naive = basescore_y_given_z_naive * \
+        (n_data / len(lik_data))
+
+    basescore_y_and_z_hgg = basescore_y_given_z_hgg + basescore_z_hgg
+    basescore_y_and_z_wnd = basescore_y_given_z_wnd + basescore_z_wnd
+
+    # Non-identifiable model
+    AIC_naive = basescore_y_given_z_naive + \
+        (params_dataset['n_nodes'] * model_n_dim + 2)
+    BIC_naive = basescore_y_given_z_naive + ((params_dataset['n_nodes'] * model_n_dim + 2) / 2) * (
+        np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] - 1) - np.log(2))
+
+    # DNML-HGG
+    pc_hgg_first, pc_hgg_second = model_hgg.get_PC(
+        sigma_max,
+        sigma_min,
+        beta_min,
+        beta_max,
+        gamma_min,
+        gamma_max,
+        sampling=True
+    )
+    DNML_HGG = basescore_y_and_z_hgg + pc_hgg_first + pc_hgg_second
+
+    AIC_HGG = basescore_y_and_z_hgg + 3
+    BIC_HGG = basescore_y_and_z_hgg + 0.5 * (np.log(params_dataset['n_nodes']) + np.log(
+        params_dataset['n_nodes'] - 1) - np.log(2)) + np.log(params_dataset['n_nodes'])
+
+    # DNML-WND
+    pc_wnd_first, pc_wnd_second = model_wnd.get_PC(
+        beta_min,
+        beta_max,
+        gamma_min,
+        gamma_max,
+        eps_1,
+        eps_2,
+        sampling=True
+    )
+    DNML_WND = basescore_y_and_z_wnd + pc_wnd_first + pc_wnd_second
+    AIC_WND = basescore_y_and_z_wnd + model_n_dim * (model_n_dim + 1) / 2 + 2
+    BIC_WND = basescore_y_and_z_wnd + (np.log(params_dataset['n_nodes']) + np.log(
+        params_dataset['n_nodes'] - 1) - np.log(2)) + (model_n_dim * (model_n_dim + 1) / 4) * np.log(params_dataset['n_nodes'])
+
+    if calc_othermetrics:
+
+        print("pos data", len(positive_samples))
+        print("neg data", len(negative_samples))
+
+        # Calculate AUC from probability
+        def calc_AUC_from_prob(
+            positive_dist,
+            negative_dist
+        ):
+
+            pred = np.append(-positive_dist, -negative_dist)
+            ground_truth = np.append(np.ones(len(positive_dist)),
+                                     np.zeros(len(negative_dist)))
+            AUC = metrics.roc_auc_score(ground_truth, pred)
+            return AUC
+
+        # latentを計算したものでのAUC
+        AUC_HGG = calc_AUC_from_prob(
+            model_hgg.calc_dist(positive_samples),
+            model_hgg.calc_dist(negative_samples)
+        )
+
+        AUC_WND = calc_AUC_from_prob(
+            model_wnd.calc_dist(positive_samples),
+            model_wnd.calc_dist(negative_samples)
+        )
+
+        AUC_naive = calc_AUC_from_prob(
+            model_naive.calc_dist(positive_samples),
+            model_naive.calc_dist(negative_samples)
+        )
+
+        if calc_groundtruth:
+            # true coordinates of positive samples
+            us = torch.Tensor(x_lorentz[positive_samples[:, 0], :])
+            vs = torch.Tensor(x_lorentz[positive_samples[:, 1], :])
+
+            dist = h_dist(us, vs)
+            p_positive = -dist.detach().cpu().numpy()
+
+            # true coordinates of negative samples
+            us = torch.Tensor(x_lorentz[negative_samples[:, 0], :])
+            vs = torch.Tensor(x_lorentz[negative_samples[:, 1], :])
+
+            dist = h_dist(us, vs)
+            p_negative = -dist.detach().cpu().numpy()
+
+            pred_g = np.append(p_positive, p_negative)
+            ground_truth = np.append(np.ones(len(p_positive)),
+                                     np.zeros(len(p_negative)))
+
+            AUC_GT = metrics.roc_auc_score(ground_truth, pred_g)
+            print("AUC_GT:", AUC_GT)
+            gt_r = torch.Tensor(x_lorentz[:, 0])
+            gt_r = torch.max(gt_r, torch.Tensor([1.0 + 0.00001]))
+
+            es_r_hgg = torch.Tensor(model_hgg.get_lorentz_table()[:, 0])
+            es_r_wnd = torch.Tensor(model_wnd.get_lorentz_table()[:, 0])
+            es_r_naive = torch.Tensor(model_naive.get_lorentz_table()[:, 0])
+
+            print(gt_r)
+            print(es_r_hgg)
+            print(es_r_wnd)
+            print(es_r_naive)
+
+            gt_r = arcosh(gt_r)
+            es_r_hgg = arcosh(es_r_hgg)
+            es_r_wnd = arcosh(es_r_wnd)
+            es_r_naive = arcosh(es_r_naive)
+
+            cor_hgg, _ = stats.spearmanr(gt_r, es_r_hgg)
+            cor_wnd, _ = stats.spearmanr(gt_r, es_r_wnd)
+            cor_naive, _ = stats.spearmanr(gt_r, es_r_naive)
+            print("cor_hgg:", cor_hgg)
+            print("cor_wnd:", cor_wnd)
+            print("cor_naive:", cor_naive)
+
+        else:
+            AUC_GT = None
+            cor_hgg = None
+            cor_wnd = None
+            cor_naive = None
+    else:
+        AUC_HGG = None
+        AUC_WND = None
+        AUC_naive = None
+        AUC_GT = None
+        cor_hgg = None
+        cor_wnd = None
+        cor_naive = None
+
+    print("-log p_HGG(y, z):", basescore_y_and_z_hgg)
+    print("-log p_WND(y, z):", basescore_y_and_z_wnd)
+    print("-log p_HGG(y|z):", basescore_y_given_z_hgg)
+    print("-log p_WND(y|z):", basescore_y_given_z_wnd)
+    print("-log p_HGG(z):", basescore_z_hgg)
+    print("-log p_WND(z):", basescore_z_wnd)
+    print("pc_hgg_first", pc_hgg_first)
+    print("pc_hgg_second", pc_hgg_second)
+    print("pc_wnd_first", pc_wnd_first)
+    print("pc_wnd_second", pc_wnd_second)
+    print("-log p_naive(y; z):", basescore_y_given_z_naive)
+    print("DNML-HGG:", DNML_HGG)
+    print("DNML-WND:", DNML_WND)
+    print("AIC_naive:", AIC_naive)
+    print("BIC_naive:", BIC_naive)
+    print("AIC_HGG:", AIC_HGG)
+    print("BIC_HGG:", BIC_HGG)
+    print("AIC_WND:", AIC_WND)
+    print("BIC_WND:", BIC_WND)
+    print("AUC_HGG:", AUC_HGG)
+    print("AUC_WND:", AUC_WND)
+    print("AUC_naive:", AUC_naive)
+    print("AUC_GT:", AUC_GT)
+
+    ret = {
+        "DNML_HGG": DNML_HGG,
+        "AIC_HGG": AIC_HGG,
+        "BIC_HGG": BIC_HGG,
+        "DNML_WND": DNML_WND,
+        "AIC_WND": AIC_WND,
+        "BIC_WND": BIC_WND,
+        "AIC_naive": AIC_naive,
+        "BIC_naive": BIC_naive,
+        "AUC_HGG": AUC_HGG,
+        "AUC_WND": AUC_WND,
+        "AUC_naive": AUC_naive,
+        "AUC_GT": AUC_GT,
+        "cor_hgg": cor_hgg,
+        "cor_wnd": cor_wnd,
+        "cor_naive": cor_naive,
+        "-log p_HGG(y, z)": basescore_y_and_z_hgg,
+        "-log p_HGG(y|z)": basescore_y_given_z_hgg,
+        "-log p_HGG(z)": basescore_z_hgg,
+        "-log p_WND(y, z)": basescore_y_and_z_wnd,
+        "-log p_WND(y|z)": basescore_y_given_z_wnd,
+        "-log p_WND(z)": basescore_z_wnd,
+        "-log p_naive(y; z)": basescore_y_given_z_naive,
+        "pc_hgg_first": pc_hgg_first,
+        "pc_hgg_second": pc_hgg_second,
+        "pc_wnd_first": pc_wnd_first,
+        "pc_wnd_second": pc_wnd_second,
+        "model_hgg": model_hgg,
+        "model_wnd": model_wnd,
+        "model_naive": model_naive
+    }
+
+    return ret
+
+
 def LinkPrediction(
     train_graph,
     positive_samples,
@@ -677,12 +996,14 @@ def LinkPrediction(
     gamma_max,
     eps_1,
     eps_2,
+    init_range,
     device,
     calc_HGG=True,
     calc_WND=True,
     calc_naive=True,
     calc_othermetrics=True,
     calc_groundtruth=False,
+    perturbation=True,
     loader_workers=16,
     shuffle=True,
     sparse=False
@@ -710,7 +1031,7 @@ def LinkPrediction(
         sigma_max=sigma_max,
         beta=1.0,
         gamma=params_dataset['R'],
-        init_range=10,
+        init_range=init_range,
         sparse=sparse,
         device=device,
         calc_latent=True
@@ -722,7 +1043,7 @@ def LinkPrediction(
         Sigma=torch.eye(model_n_dim) * 10,
         beta=1.0,
         gamma=params_dataset['R'],
-        init_range=10,
+        init_range=init_range,
         sparse=sparse,
         device=device,
         calc_latent=True
@@ -736,7 +1057,7 @@ def LinkPrediction(
         sigma_max=sigma_max,
         beta=1.0,
         gamma=params_dataset['R'],
-        init_range=10,
+        init_range=init_range,
         sparse=sparse,
         device=device,
         calc_latent=False
@@ -753,6 +1074,7 @@ def LinkPrediction(
         beta_min=beta_min,
         gamma_min=gamma_min,
         gamma_max=gamma_max,
+        perturbation=perturbation,
         device=device
 
     )
@@ -766,6 +1088,7 @@ def LinkPrediction(
         beta_min=beta_min,
         gamma_min=gamma_min,
         gamma_max=gamma_max,
+        perturbation=perturbation,
         device=device
     )
     rsgd_naive = RSGD_Lorentz(
@@ -778,6 +1101,7 @@ def LinkPrediction(
         beta_min=beta_min,
         gamma_min=gamma_min,
         gamma_max=gamma_max,
+        perturbation=perturbation,
         device=device
     )
 
@@ -787,8 +1111,10 @@ def LinkPrediction(
 
     start = time.time()
 
+    change_learning_rate = 100
+
     for epoch in range(burn_epochs):
-        if epoch == 10:
+        if epoch == change_learning_rate:
             rsgd_hgg.param_groups[0]["lr_embeddings"] = lr_epoch_10
             rsgd_wnd.param_groups[0]["lr_embeddings"] = lr_epoch_10
             rsgd_naive.param_groups[0]["lr_embeddings"] = lr_epoch_10
@@ -817,14 +1143,20 @@ def LinkPrediction(
 
             if calc_HGG:  # DNML-HGG
                 rsgd_hgg.zero_grad()
-                loss_hgg = model_hgg(pairs, labels).mean()
+                if epoch < change_learning_rate:
+                    loss_hgg = model_hgg.lik_y_given_z(pairs, labels).mean()
+                else:
+                    loss_hgg = model_hgg(pairs, labels).mean()
                 loss_hgg.backward()
                 rsgd_hgg.step()
                 losses_hgg.append(loss_hgg)
 
             if calc_WND:  # DNML-WND
                 rsgd_wnd.zero_grad()
-                loss_wnd = model_wnd(pairs, labels).mean()
+                if epoch < change_learning_rate + 10:
+                    loss_wnd = model_wnd.lik_y_given_z(pairs, labels).mean()
+                else:
+                    loss_wnd = model_wnd(pairs, labels).mean()
                 loss_wnd.backward()
                 rsgd_wnd.step()
                 losses_wnd.append(loss_wnd)
@@ -1107,6 +1439,7 @@ if __name__ == '__main__':
     gamma_max = 10.0
     eps_1 = 1e-6
     eps_2 = 1e3
+    init_range = 0.001
     # others
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -1177,6 +1510,7 @@ if __name__ == '__main__':
             gamma_max=gamma_max,
             eps_1=eps_1,
             eps_2=eps_2,
+            init_range=init_range,
             device=device,
             calc_HGG=True,
             calc_WND=True,
@@ -1221,6 +1555,7 @@ if __name__ == '__main__':
         ret["gamma_min"] = gamma_min
         ret["eps_1"] = eps_1
         ret["eps_2"] = eps_2
+        ret["init_range"] = init_range
 
         row = pd.DataFrame(ret.values(), index=ret.keys()).T
 
@@ -1271,7 +1606,8 @@ if __name__ == '__main__':
             "gamma_max",
             "gamma_min",
             "eps_1",
-            "eps_2"
+            "eps_2",
+            "init_range"
         ]
         )
 
