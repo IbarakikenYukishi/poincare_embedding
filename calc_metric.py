@@ -15,16 +15,26 @@ from functools import partial
 
 
 RESULTS = "results"
+loosely_dotted = (0, (1, 10))
 
 
 def artificial(dataset):
     D_true_list = [8, 16]
+    # D_true_list = [8]
     # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
     n_nodes_list = [400, 800, 1600, 3200, 6400]
     n_graphs = 12
     T_gap = 2
 
     for D_true in D_true_list:
+        if D_true == 8:
+            label = [0, 0, 1, 0, 0, 0]
+        elif D_true == 16:
+            label = [0, 0, 0, 1, 0, 0]
+        # if D_true == 8:
+        #     label = [0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+        # elif D_true == 16:
+        #     label = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0]
 
         for n_nodes in n_nodes_list:
             bene_DNML = []
@@ -48,6 +58,14 @@ def artificial(dataset):
                     RESULTS + "/" + dataset + "/dim_" + str(D_true) + "/result_" + str(n_nodes) +
                     "_" + str(n_graph) + "_MinGE.csv")
 
+                result = result[result["model_n_dims"].isin(
+                    [2, 4, 8, 16, 32, 64])]
+                result_MinGE = result_MinGE[result_MinGE[
+                    "model_n_dims"].isin([2, 4, 8, 16, 32, 64])]
+
+                result = result.sort_values("model_n_dims")
+                result_MinGE = result_MinGE.sort_values("model_n_dims")
+
                 D_DNML = result["model_n_dims"].values[
                     np.argmin(result["DNML_" + dataset].values)]
                 D_AIC_latent = result["model_n_dims"].values[
@@ -68,28 +86,31 @@ def artificial(dataset):
                 estimate_BIC_naive.append(D_BIC_naive)
                 estimate_MinGE.append(D_MinGE)
 
-                # bene_DNML.append(
-                #     label_ranking_average_precision_score([label], [-result["DNML_codelength"].values]))
-                # bene_AIC.append(
-                #     label_ranking_average_precision_score([label], [-result["AIC_naive"].values]))
-                # bene_BIC.append(
-                #     label_ranking_average_precision_score([label], [-result["BIC_naive"].values]))
-                # bene_MinGE.append(
-                # label_ranking_average_precision_score([label],
-                # [-result_MinGE["MinGE"].values]))
-
                 bene_DNML.append(
-                    max(0, 1 - abs(np.log2(D_DNML) - np.log2(D_true)) / T_gap))
+                    label_ranking_average_precision_score([label], [-result["DNML_" + dataset].values]))
                 bene_AIC_latent.append(
-                    max(0, 1 - abs(np.log2(D_AIC_latent) - np.log2(D_true)) / T_gap))
+                    label_ranking_average_precision_score([label], [-result["AIC_" + dataset].values]))
                 bene_BIC_latent.append(
-                    max(0, 1 - abs(np.log2(D_BIC_latent) - np.log2(D_true)) / T_gap))
+                    label_ranking_average_precision_score([label], [-result["BIC_" + dataset].values]))
                 bene_AIC_naive.append(
-                    max(0, 1 - abs(np.log2(D_AIC_naive) - np.log2(D_true)) / T_gap))
+                    label_ranking_average_precision_score([label], [-result["AIC_naive"].values]))
                 bene_BIC_naive.append(
-                    max(0, 1 - abs(np.log2(D_BIC_naive) - np.log2(D_true)) / T_gap))
+                    label_ranking_average_precision_score([label], [-result["BIC_naive"].values]))
                 bene_MinGE.append(
-                    max(0, 1 - abs(np.log2(D_MinGE) - np.log2(D_true)) / T_gap))
+                    label_ranking_average_precision_score([label], [-result_MinGE["MinGE"].values]))
+
+                # bene_DNML.append(
+                #     max(0, 1 - abs(np.log2(D_DNML) - np.log2(D_true)) / T_gap))
+                # bene_AIC_latent.append(
+                #     max(0, 1 - abs(np.log2(D_AIC_latent) - np.log2(D_true)) / T_gap))
+                # bene_BIC_latent.append(
+                #     max(0, 1 - abs(np.log2(D_BIC_latent) - np.log2(D_true)) / T_gap))
+                # bene_AIC_naive.append(
+                #     max(0, 1 - abs(np.log2(D_AIC_naive) - np.log2(D_true)) / T_gap))
+                # bene_BIC_naive.append(
+                #     max(0, 1 - abs(np.log2(D_BIC_naive) - np.log2(D_true)) / T_gap))
+                # bene_MinGE.append(
+                # max(0, 1 - abs(np.log2(D_MinGE) - np.log2(D_true)) / T_gap))
 
                 plt.clf()
                 fig = plt.figure(figsize=(8, 5))
@@ -107,20 +128,21 @@ def artificial(dataset):
                 result["MinGE"] = normalize(result_MinGE["MinGE"])
 
                 ax.plot(result["model_n_dims"], result[
-                        "DNML_" + dataset], label="DNML-" + dataset, color="red")
+                        "DNML_" + dataset], label="DNML-" + dataset, linestyle="solid", color="black")
                 # ax.plot(result["model_n_dims"], result["AIC_"+dataset],
                 #         label="AIC_"+dataset, color="blue")
                 # ax.plot(result["model_n_dims"], result["BIC_"+dataset],
                 #         label="BIC_"+dataset, color="green")
                 ax.plot(result["model_n_dims"], result["AIC_naive"],
-                        label="AIC_naive", color="blue")
+                        label="AIC_naive", linestyle="dotted", color="black")
                 ax.plot(result["model_n_dims"], result["BIC_naive"],
-                        label="BIC_naive", color="green")
+                        label="BIC_naive", linestyle="dashed", color="black")
                 ax.plot(result["model_n_dims"], result[
-                    "MinGE"], label="MinGE", color="orange")
+                    "MinGE"], label="MinGE", linestyle="dashdot", color="black")
                 plt.xscale('log')
 
-                plt.xticks(result["model_n_dims"], fontsize=20)
+                # plt.xticks(result["model_n_dims"], fontsize=8)
+                plt.xticks([2, 4, 8, 16, 32, 64], fontsize=20)
                 plt.yticks(fontsize=20)
                 ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
                 plt.legend(bbox_to_anchor=(1, 1), loc='upper right',
@@ -175,13 +197,25 @@ def artificial(dataset):
                   "±", np.std(estimate_MinGE))
 
 
-def plot_figure():
+def plot_figure(dataset_name, n_graph):
 
-    result = pd.read_csv(RESULTS + "/dim_16/result_6400_3.csv")
+    result = pd.read_csv(RESULTS + "/" + dataset_name +
+                         "/dim_8/result_6400_" + str(n_graph) + ".csv")
+
+    dataset = np.load('dataset/' + dataset_name + '/dim_8/graph_6400_' + str(n_graph) +
+                      '.npy', allow_pickle='TRUE').item()  # object型なので、itemを付けないと辞書として使えない。
+    params = dataset["params_adj_mat"]
+    print(params)
+
     result = result.fillna(9999999999999)
+    result = result[result["model_n_dims"].isin(
+        [2, 4, 8, 16, 32, 64])]
+
     # result = result.drop(result.index[[5]])
     D_DNML = result["model_n_dims"].values[
-        np.argmin(result["DNML_codelength"].values)]
+        np.argmin(result["DNML_" + dataset_name].values)]
+    # print(result[["beta", "sigma"]])
+    # print(result[["beta", "R", "sigma"]])
 
     plt.clf()
     fig = plt.figure(figsize=(8, 5))
@@ -194,16 +228,18 @@ def plot_figure():
     #     result["DNML_codelength"])
 
     ax.plot(result["model_n_dims"], result[
-            "DNML_codelength"], label="L_DNML(y, z)", color="green")
+            "DNML_" + dataset_name], label="L_DNML(y, z)", linestyle="solid", color="black")
     ax.plot(result["model_n_dims"], result[
-            "basescore_y_given_z"], label="L_NML(y|z)", color="blue")
+            "-log p_" + dataset_name + "(y|z)"], label="L_NML(y|z)", linestyle="dotted", color="black")
     ax_2 = ax.twinx()
     ax_2.plot(result["model_n_dims"], result[
-        "basescore_z"], label="L_NML(z)", color="orange")
+        "-log p_" + dataset_name + "(z)"], label="L_NML(z)", linestyle="dashdot", color="black")
     plt.xscale('log')
     # plt.yscale('log')
 
-    plt.xticks(result["model_n_dims"], fontsize=20)
+    # plt.xticks(result["model_n_dims"], fontsize=20)
+    plt.xticks([2, 4, 8, 16, 32, 64], fontsize=20)
+
     ax.tick_params(labelsize=20)
     ax_2.tick_params(labelsize=20)
 
@@ -223,10 +259,10 @@ def plot_figure():
     ax.set_ylabel("Code Length", fontsize=20)
     plt.tight_layout()
 
-    plt.savefig("example.png")
+    plt.savefig("example_" + dataset_name + ".png")
 
 
-def calc_new_metrics(result):
+def calc_average_conciseness(result, eps):
     D_max = 64
 
     D_DNML_HGG = result["model_n_dims"].values[
@@ -253,7 +289,17 @@ def calc_new_metrics(result):
     AUC_WND = np.array(result["AUC_WND"])
     AUC_naive = np.array(result["AUC_naive"])
 
-    def calc_criterion(D_hat, D_eps_list):
+    # AUC_HGG = np.array(result["AUC_HGG"])/np.max(result["AUC_HGG"])
+    # AUC_WND = np.array(result["AUC_WND"])/np.max(result["AUC_WND"])
+    # AUC_naive = np.array(result["AUC_naive"])/np.max(result["AUC_naive"])
+
+    # print(AUC_HGG)
+    # print(AUC_WND)
+    # print(AUC_naive)
+
+    def conceseness_with_fixed_eps(D_hat, D_eps_list):
+        if len(D_eps_list) == 0:
+            return 0
         D_max = max(D_eps_list)
         D_min = min(D_eps_list)
         if D_hat in D_eps_list:
@@ -261,46 +307,56 @@ def calc_new_metrics(result):
                 return 0
             else:
                 return 1 - (np.log2(D_hat) - np.log2(D_min)) / (np.log2(D_max) - np.log2(D_min))
+                # return 1 - (D_hat - D_min) / (D_max - D_min)
+
         else:
             return 0
 
-    def calc_conciseness(AUCs, D_hat, eps_range, DIV):
+    def average_conciseness(AUCs, AUC_max, D_hat, eps_range, DIV):
         criterion_list = []
 
-        AUC_max = max(AUCs)
-        AUC_min = min(AUCs)
+        # AUC_max = max(AUCs)
+        # AUC_min = min(AUCs)
         eps_list = np.arange(DIV) * eps_range / DIV
+
+        # AUCs = AUCs
 
         for eps in eps_list:
             D_eps_list = model_n_dims[np.where(AUCs >= AUC_max - eps)[0]]
-            D_min = min(D_eps_list)
+            # D_eps_list = model_n_dims[np.where(AUCs >= 1 - eps)[0]]
+            # print(D_eps_list)
+            # D_min = min(D_eps_list)
 
-            criterion_list.append(calc_criterion(D_hat, D_eps_list))
+            criterion_list.append(
+                conceseness_with_fixed_eps(D_hat, D_eps_list))
 
         criterion_list = np.array(criterion_list)
 
         return criterion_list
 
     DIV = 1000
-    eps_range = 0.1
+    # eps_range = 0.02
+    AUC_max = max(np.max(result["AUC_HGG"]), np.max(
+        result["AUC_WND"]), np.max(result["AUC_naive"]))
 
-    criterion_DNML_HGG_list = calc_conciseness(
-        AUC_HGG, D_DNML_HGG, eps_range, DIV)
-    criterion_AIC_HGG_list = calc_conciseness(
-        AUC_HGG, D_AIC_HGG, eps_range, DIV)
-    criterion_BIC_HGG_list = calc_conciseness(
-        AUC_HGG, D_BIC_HGG, eps_range, DIV)
-    criterion_DNML_WND_list = calc_conciseness(
-        AUC_WND, D_DNML_WND, eps_range, DIV)
-    criterion_AIC_WND_list = calc_conciseness(
-        AUC_WND, D_AIC_WND, eps_range, DIV)
-    criterion_BIC_WND_list = calc_conciseness(
-        AUC_WND, D_BIC_WND, eps_range, DIV)
-    criterion_AIC_naive_list = calc_conciseness(
-        AUC_naive, D_AIC_naive, eps_range, DIV)
-    criterion_BIC_naive_list = calc_conciseness(
-        AUC_naive, D_BIC_naive, eps_range, DIV)
-    criterion_MinGE_list = calc_conciseness(AUC_naive, D_MinGE, eps_range, DIV)
+    criterion_DNML_HGG_list = average_conciseness(
+        AUC_HGG, AUC_max, D_DNML_HGG, eps, DIV)
+    criterion_AIC_HGG_list = average_conciseness(
+        AUC_HGG, AUC_max, D_AIC_HGG, eps, DIV)
+    criterion_BIC_HGG_list = average_conciseness(
+        AUC_HGG, AUC_max, D_BIC_HGG, eps, DIV)
+    criterion_DNML_WND_list = average_conciseness(
+        AUC_WND, AUC_max, D_DNML_WND, eps, DIV)
+    criterion_AIC_WND_list = average_conciseness(
+        AUC_WND, AUC_max, D_AIC_WND, eps, DIV)
+    criterion_BIC_WND_list = average_conciseness(
+        AUC_WND, AUC_max, D_BIC_WND, eps, DIV)
+    criterion_AIC_naive_list = average_conciseness(
+        AUC_naive, AUC_max, D_AIC_naive, eps, DIV)
+    criterion_BIC_naive_list = average_conciseness(
+        AUC_naive, AUC_max, D_BIC_naive, eps, DIV)
+    criterion_MinGE_list = average_conciseness(
+        AUC_naive, AUC_max, D_MinGE, eps, DIV)
 
     print("Average conciseness")
     print("DNML_HGG:", np.average(criterion_DNML_HGG_list))
@@ -330,13 +386,7 @@ def calc_new_metrics(result):
 
 def realworld():
     dataset_name_list = ["ca-AstroPh", "ca-CondMat", "ca-GrQc", "ca-HepPh"]
-    # dataset_name_list = ["ca-AstroPh", "ca-HepPh"]
-
-    # dataset_name_list = ["ca-GrQc",  "ca-HepPh"]
-
-    # n_dim_list = [2, 4, 8, 16, 32, 64]
-    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
-    n_dim_list = [2, 3, 5, 6, 8, 16, 32, 64]
+    n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
 
     result_conciseness = pd.DataFrame({})
 
@@ -418,7 +468,13 @@ def realworld():
         print("cor_BIC_naive:", cor_BIC)
         print("cor_MinGE:", cor_MinGE)
 
-        ret = calc_new_metrics(result)
+        # conciseness
+        eps = 0.025
+        print("eps =", eps)
+        ret = calc_average_conciseness(result, eps)
+        eps = 0.05
+        print("eps =", eps)
+        ret = calc_average_conciseness(result, eps)
 
         row = pd.DataFrame(ret.values(), index=ret.keys()).T
         result_conciseness = pd.concat([result_conciseness, row])
@@ -430,14 +486,17 @@ def realworld():
         ax = fig.add_subplot(111)
 
         ax.plot(result["model_n_dims"], result["AUC_HGG"],
-                label="AUC of -log p_HGG(y, z)", color="red")
+                label="-log p(y, z; β, γ, σ)", linestyle="solid", color="black")
         ax.plot(result["model_n_dims"], result["AUC_WND"],
-                label="AUC of -log p_WND(y, z)", color="orange")
+                label="-log p(y, z; β, γ, Σ)", linestyle=loosely_dotted, color="black")
         ax.plot(result["model_n_dims"], result["AUC_naive"],
-                label="AUC of -log p(y|z)", color="blue")
+                label="-log p(y|z; β, γ)", linestyle="dashed", color="black")
         plt.xscale('log')
-        plt.ylim(0.4, 1.00)
-        plt.xticks(result["model_n_dims"], fontsize=20)
+        plt.ylim(0.7, 1.00)
+        # plt.xticks(result["model_n_dims"], fontsize=8)
+
+        plt.xticks([2, 4, 8, 16, 32, 64], fontsize=20)
+
         plt.yticks(fontsize=20)
         ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
         plt.legend(bbox_to_anchor=(1, 0), loc='lower right',
@@ -466,17 +525,19 @@ def realworld():
         result["MinGE"] = normalize(result["MinGE"])
 
         ax.plot(result["model_n_dims"], result[
-                "DNML_HGG"], label="DNML-HGG", color="red")
+                "DNML_HGG"], label="DNML-PUD", linestyle="solid", color="black")
         ax.plot(result["model_n_dims"], result[
-                "DNML_WND"], label="DNML-WND", color="black")
+                "DNML_WND"], label="DNML-WND", linestyle=loosely_dotted, color="black")
         ax.plot(result["model_n_dims"], result["AIC_naive"],
-                label="AIC_naive", color="blue")
+                label="AIC_naive", linestyle="dotted", color="black")
         ax.plot(result["model_n_dims"], result["BIC_naive"],
-                label="BIC_naive", color="green")
+                label="BIC_naive", linestyle="dashed", color="black")
         ax.plot(result["model_n_dims"], result[
-                "MinGE"], label="MinGE", color="orange")
+                "MinGE"], label="MinGE", linestyle="dashdot", color="black")
         plt.xscale('log')
-        plt.xticks(result["model_n_dims"], fontsize=20)
+        # plt.xticks(result["model_n_dims"], fontsize=8)
+        plt.xticks([2, 4, 8, 16, 32, 64], fontsize=20)
+
         plt.yticks(fontsize=20)
         ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
         plt.legend(bbox_to_anchor=(1, 1), loc='upper right',
@@ -493,17 +554,24 @@ def realworld():
 
 def calc_is_a_scores(model_n_dim, dataset_name, is_a):
     lorentz_table_hgg = torch.load(
-        RESULTS + "/" + dataset_name + '/result_' + str(model_n_dim) + '_hgg.pth').get_lorentz_table()
+        RESULTS + "/" + dataset_name + '/result_' + str(model_n_dim) + '_hgg.pth').to("cpu").get_lorentz_table()
     lorentz_table_wnd = torch.load(
-        RESULTS + "/" + dataset_name + '/result_' + str(model_n_dim) + '_wnd.pth').get_lorentz_table()
+        RESULTS + "/" + dataset_name + '/result_' + str(model_n_dim) + '_wnd.pth').to("cpu").get_lorentz_table()
     lorentz_table_naive = torch.load(
-        RESULTS + "/" + dataset_name + '/result_' + str(model_n_dim) + '_naive.pth').get_lorentz_table()
+        RESULTS + "/" + dataset_name + '/result_' + str(model_n_dim) + '_naive.pth').to("cpu").get_lorentz_table()
+
     is_a_score_hgg = is_a_score(
         is_a, model_n_dim, lorentz_table_hgg, 100).item()
     is_a_score_wnd = is_a_score(
         is_a, model_n_dim, lorentz_table_wnd, 100).item()
     is_a_score_naive = is_a_score(
         is_a, model_n_dim, lorentz_table_naive, 100).item()
+
+    del lorentz_table_naive
+    del lorentz_table_wnd
+    del lorentz_table_hgg
+
+    # torch.cuda.empty_cache()
 
     return is_a_score_hgg, is_a_score_wnd, is_a_score_naive
 
@@ -518,18 +586,21 @@ def result_wn(model_n_dims, dataset_name):
                    "_data.npy", allow_pickle=True).item()
     is_a = data["is_a"]
 
+    print("n_nodes:", len(data["adj_mat"]))
+    print("n_is-a:", len(data["is_a"]))
+
     calc_is_a_scores_ = partial(
         calc_is_a_scores, dataset_name=dataset_name, is_a=is_a)
 
-    # multiprocessing
-    p = Pool(12)
+    # # multiprocessing
+    # p = Pool(2)
 
-    results = p.map(calc_is_a_scores_, model_n_dims)
-    results = np.array(results)
+    # results = p.map(calc_is_a_scores_, model_n_dims)
+    # results = np.array(results)
 
-    is_a_score_hgg_list = results[:, 0]
-    is_a_score_wnd_list = results[:, 1]
-    is_a_score_naive_list = results[:, 2]
+    # is_a_score_hgg_list = results[:, 0]
+    # is_a_score_wnd_list = results[:, 1]
+    # is_a_score_naive_list = results[:, 2]
 
     # for model_n_dim in model_n_dims:
     #     lorentz_table_hgg = torch.load(
@@ -560,6 +631,10 @@ def result_wn(model_n_dims, dataset_name):
         row = pd.read_csv(RESULTS + "/" + dataset_name +
                           "/result_" + str(n_dim) + ".csv")
         result = result.append(row)
+
+    is_a_score_hgg_list = np.array(result["is-a-score_hgg"])
+    is_a_score_wnd_list = np.array(result["is-a-score_wnd"])
+    is_a_score_naive_list = np.array(result["is-a-score_naive"])
 
     # result = pd.read_csv(RESULTS + "/" + dataset_name + "/result.csv")
 
@@ -671,17 +746,18 @@ def result_wn(model_n_dims, dataset_name):
     result["MinGE"] = normalize(result["MinGE"])
 
     ax.plot(result["model_n_dims"], result[
-            "DNML_HGG"], label="DNML-HGG", color="red")
+            "DNML_HGG"], label="DNML-PUD", linestyle="solid", color="black")
     ax.plot(result["model_n_dims"], result[
-            "DNML_WND"], label="DNML-WND", color="black")
+            "DNML_WND"], label="DNML-WND", linestyle=loosely_dotted, color="black")
     ax.plot(result["model_n_dims"], result["AIC_naive"],
-            label="AIC_naive", color="blue")
+            label="AIC_naive", linestyle="dotted", color="black")
     ax.plot(result["model_n_dims"], result["BIC_naive"],
-            label="BIC_naive", color="green")
+            label="BIC_naive", linestyle="dashed", color="black")
     ax.plot(result["model_n_dims"], result[
-            "MinGE"], label="MinGE", color="orange")
+            "MinGE"], label="MinGE", linestyle="dashdot", color="black")
     plt.xscale('log')
-    plt.xticks(result["model_n_dims"], fontsize=20)
+    # plt.xticks(result["model_n_dims"], fontsize=8)
+    plt.xticks([2, 4, 8, 16, 32, 64], fontsize=20)
     plt.yticks(fontsize=20)
     ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
     plt.legend(bbox_to_anchor=(1, 1), loc='upper right',
@@ -698,13 +774,15 @@ def result_wn(model_n_dims, dataset_name):
     ax = fig.add_subplot(111)
 
     ax.plot(result["model_n_dims"], is_a_score_hgg_list,
-            label="Is-a scores of -log p_HGG(y, z)", color="red")
+            label="-log p(y, z; β, γ, σ)", linestyle="solid", color="black")
     ax.plot(result["model_n_dims"], is_a_score_wnd_list,
-            label="Is-a scores of -log p_WND(y, z)", color="orange")
+            label="-log p(y, z; β, γ, Σ)", linestyle=loosely_dotted, color="black")
     ax.plot(result["model_n_dims"], is_a_score_naive_list,
-            label="Is-a scores of -log p(y|z)", color="blue")
+            label="-log p(y | z; β, γ)", linestyle="dashed", color="black")
     plt.xscale('log')
-    plt.xticks(result["model_n_dims"], fontsize=20)
+    # plt.xticks(result["model_n_dims"], fontsize=8)
+    plt.xticks([2, 4, 8, 16, 32, 64], fontsize=20)
+
     plt.yticks(fontsize=20)
     ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
     plt.legend(bbox_to_anchor=(1, 1), loc='upper right',
@@ -720,14 +798,21 @@ def result_wn(model_n_dims, dataset_name):
 
 
 def wn_dataset():
+
     dataset_name_list = [
-        "animal",
-        "group",
+        # "animal",
+        # "group",
         "mammal",
         "solid",
         "tree",
-        # "verb",
-        "worker"
+        "worker",
+        "adult",
+        # "fish",
+        "instrument",
+        "leader",
+        "implement",
+        # "commodity",
+        # "vehicle"
     ]
     bene_DNML_HGG = []
     bene_DNML_WND = []
@@ -742,7 +827,13 @@ def wn_dataset():
 
     for dataset_name in dataset_name_list:
         ret = result_wn(
-            model_n_dims=[2, 3, 4, 5, 6, 7, 8, 16, 32, 64], dataset_name=dataset_name)
+            model_n_dims=[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+                          32, 64], dataset_name=dataset_name)
+        # ret = result_wn(
+        #     model_n_dims=[2, 4, 8, 16, 32, 64], dataset_name=dataset_name)
+        # ret = result_wn(
+        #     model_n_dims=[2, 3, 4, 5, 6, 7, 8], dataset_name=dataset_name)
+
         bene_DNML_HGG.append(ret["bene_DNML_HGG"])
         bene_DNML_WND.append(ret["bene_DNML_WND"])
         bene_AIC_naive.append(ret["bene_AIC_naive"])
@@ -785,12 +876,13 @@ def wn_dataset():
 
 if __name__ == "__main__":
 
-    # print("Plot Example Figure")
-    # plot_figure()
+    print("Plot Example Figure")
+    plot_figure("HGG", 5)
+    plot_figure("WND", 3)
     # print("Results of Artificial Datasets")
     # artificial("HGG")
     # artificial("WND")
-    print("Results of Scientific Collaboration Networks")
-    realworld()
+    # print("Results of Scientific Collaboration Networks")
+    # realworld()
     # print("Results of WN dataset")
     # wn_dataset()
