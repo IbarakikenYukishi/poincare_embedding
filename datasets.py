@@ -407,7 +407,7 @@ def create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list):
 
 if __name__ == '__main__':
     # WND
-    # true dim 16
+    # true dim 8
     n_dim_true_list = [8]
     sigma_list = [0.35, 0.375, 0.40]
     beta_list = [0.5, 0.6, 0.7, 0.8]
