@@ -82,7 +82,7 @@ def calc_GE(dataset, dim_true, n_dim, n_nodes, n_graph, weight_entropy):
 
     N = params_dataset["n_nodes"]
 
-    N_limit = min(N, 3200)
+    N_limit = min(N, 6400)
     if N > N_limit:
         idx = np.array(range(N))
         idx = np.random.permutation(
@@ -300,7 +300,7 @@ if __name__ == "__main__":
 
     # # link prediction
     # print("Link Prediction")
-    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
+    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
     # weight_entropy = 1.0
     # dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
     # MinGE_link_prediction(
@@ -309,17 +309,27 @@ if __name__ == "__main__":
     #     weight_entropy=weight_entropy
     # )
 
-    # # lexical dataset
+    # lexical dataset
     # print("Lexical Dataset")
-    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 16, 32, 64]
+    # # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
+    # # dataset_name_list = [
+    # #     "animal",
+    # #     "group",
+    # #     "mammal",
+    # #     "solid",
+    # #     "tree",
+    # #     "verb",
+    # #     "worker"
+    # # ]
+    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
     # dataset_name_list = [
-    #     "animal",
-    #     "group",
-    #     "mammal",
-    #     "solid",
-    #     "tree",
-    #     "verb",
-    #     "worker"
+    #     "adult",
+    #     "fish",
+    #     "instrument",
+    #     "leader",
+    #     "implement",
+    #     "commodity",
+    #     "vehicle"
     # ]
     # MinGE_lexical_dataset(
     #     dataset_name_list=dataset_name_list,
