@@ -59,6 +59,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     eps_1 = 1e-6
     eps_2 = 1e3
     init_range = 0.001
+    perturbation = True
     # それ以外
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -103,6 +104,7 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         calc_naive=True,
         calc_othermetrics=True,
         calc_groundtruth=False,
+        perturbation=perturbation,
         loader_workers=16,
         shuffle=True,
         sparse=False
@@ -254,11 +256,11 @@ if __name__ == '__main__':
     if int(args.dataset) == 0:
         dataset_name = "ca-AstroPh"
     elif int(args.dataset) == 1:
-        dataset_name = "ca-HepPh"
+        dataset_name = "ca-CondMat"
     elif int(args.dataset) == 2:
         dataset_name = "ca-GrQc"
     elif int(args.dataset) == 3:
-        dataset_name = "ca-CondMat"
+        dataset_name = "ca-HepPh"
 
     os.makedirs(RESULTS + "/" + dataset_name, exist_ok=True)
 

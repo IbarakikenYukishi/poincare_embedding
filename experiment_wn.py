@@ -63,10 +63,10 @@ def create_wn_dataset(dataset_name):
     np.save("dataset/wn_dataset/" + dataset_name + "_data.npy", data)
 
 
-def is_a_score(is_a, n_dim, lorentz_table, alpha=1000, print_stats=False, print_is_a_score=False):
+def is_a_score(is_a, n_dim, lorentz_table, alpha=100, print_stats=False, print_is_a_score=False):
     if print_stats:
         r = arcosh(torch.Tensor(lorentz_table[:, 0]))
-        torch.set_printoptions(edgeitems=1000)
+        # torch.set_printoptions(edgeitems=1000)
         print(r)
 
     score_sum = 0
@@ -121,12 +121,12 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     n_max_negatives = n_max_positives * 10
     lr_embeddings = 0.1
-    # lr_epoch_10 = 10.0 * \
-    #     (burn_batch_size * (n_max_positives + n_max_negatives)) / \
-    #     32 / 100  # batchサイズに対応して学習率変更
-    lr_epoch_10 = 1.0 * \
+    lr_epoch_10 = 10.0 * \
         (burn_batch_size * (n_max_positives + n_max_negatives)) / \
         32 / 100  # batchサイズに対応して学習率変更
+    # lr_epoch_10 = 1.0 * \
+    #     (burn_batch_size * (n_max_positives + n_max_negatives)) / \
+    #     32 / 100  # batchサイズに対応して学習率変更
     lr_beta = 0.001
     lr_gamma = 0.001
     sigma_max = 1.0
@@ -138,6 +138,7 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     eps_1 = 1e-6
     eps_2 = 1e3
     init_range = 0.001
+    perturbation = False
     # others
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -151,6 +152,7 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
 
     result = pd.DataFrame()
 
+    # ret = LinkPrediction_WN(
     ret = LinkPrediction(
         train_graph=adj_mat,
         positive_samples=None,
@@ -182,6 +184,7 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
         calc_naive=True,
         calc_othermetrics=False,
         calc_groundtruth=False,
+        perturbation=perturbation,
         loader_workers=16,
         shuffle=True,
         sparse=False
@@ -313,6 +316,20 @@ if __name__ == '__main__':
         dataset_name = "tree"
     elif int(args.dataset) == 5:
         dataset_name = "worker"
+    elif int(args.dataset) == 6:
+        dataset_name = "adult"
+    elif int(args.dataset) == 7:
+        dataset_name = "fish"
+    elif int(args.dataset) == 8:
+        dataset_name = "leader"
+    elif int(args.dataset) == 9:
+        dataset_name = "instrument"
+    elif int(args.dataset) == 10:
+        dataset_name = "implement"
+    elif int(args.dataset) == 11:
+        dataset_name = "commodity"
+    elif int(args.dataset) == 12:
+        dataset_name = "vehicle"
 
     print(dataset_name)
 

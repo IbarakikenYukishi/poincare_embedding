@@ -9,6 +9,11 @@ except LookupError as e:
     import nltk
     nltk.download('wordnet')
 
+import nltk
+nltk.download('omw-1.4')
+# nltk.download('wordnet')
+
+
 # make sure each edge is included only once
 edge_set = set()
 for synset in tqdm(wn.all_synsets(pos='n')):
@@ -25,7 +30,14 @@ nouns['weight'] = 1
 
 # create datasets
 os.makedirs("./dataset/wn_dataset/", exist_ok=True)
-dataset_names = ["animal", "mammal", "group", "solid", "tree", "worker"]
+# dataset_names = ["animal", "mammal", "group", "solid", "tree", "worker"]
+# dataset_names = ["family", "object"]
+# dataset_names = ["person", "plant", "fish"]
+# dataset_names = ["adult"]
+# dataset_names = ["traveler", "leader", "writer"]
+# dataset_names = ["artifact", "instrument", "city", "location", "clothing", "tool"]
+# dataset_names = ["device"]
+dataset_names = ["implement", "commodity", "vehicle"]
 
 for dataset_name in dataset_names:
     # Extract the set of nouns that have the word as a hypernym
