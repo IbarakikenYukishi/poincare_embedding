@@ -280,13 +280,11 @@ def MinGE_lexical_dataset(
 if __name__ == "__main__":
     # artificial dataset
     print("Artificial Datasets")
-    # n_dim_true_list = [16]
     n_dim_true_list = [8, 16]
     dataset_list = ["HGG", "WND"]
-    # dataset_list = ["HGG"]
     n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    # n_dim_list = [2, 4, 8, 16, 32, 64]
-    n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
+    n_dim_list = [2, 4, 8, 16, 32, 64]
+    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
     n_graphs = 12
     weight_entropy = 1.0
     MinGE_artificial_dataset(
@@ -298,40 +296,31 @@ if __name__ == "__main__":
         weight_entropy=weight_entropy
     )
 
-    # # link prediction
-    # print("Link Prediction")
-    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # weight_entropy = 1.0
-    # dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
-    # MinGE_link_prediction(
-    #     dataset_name_list=dataset_name_list,
-    #     n_dim_list=n_dim_list,
-    #     weight_entropy=weight_entropy
-    # )
+    # link prediction
+    print("Link Prediction")
+    n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
+    weight_entropy = 1.0
+    dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
+    MinGE_link_prediction(
+        dataset_name_list=dataset_name_list,
+        n_dim_list=n_dim_list,
+        weight_entropy=weight_entropy
+    )
 
     # lexical dataset
-    # print("Lexical Dataset")
-    # # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # # dataset_name_list = [
-    # #     "animal",
-    # #     "group",
-    # #     "mammal",
-    # #     "solid",
-    # #     "tree",
-    # #     "verb",
-    # #     "worker"
-    # # ]
-    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # dataset_name_list = [
-    #     "adult",
-    #     "fish",
-    #     "instrument",
-    #     "leader",
-    #     "implement",
-    #     "commodity",
-    #     "vehicle"
-    # ]
-    # MinGE_lexical_dataset(
-    #     dataset_name_list=dataset_name_list,
-    #     n_dim_list=n_dim_list
-    # )
+    print("Lexical Dataset")
+    n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
+    dataset_name_list = [
+        "mammal",
+        "solid",
+        "tree",
+        "worker",
+        "adult",
+        "instrument",
+        "leader",
+        "implement",
+    ]
+    MinGE_lexical_dataset(
+        dataset_name_list=dataset_name_list,
+        n_dim_list=n_dim_list
+    )
