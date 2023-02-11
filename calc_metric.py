@@ -127,16 +127,20 @@ def artificial(dataset):
                 result["BIC_naive"] = normalize(result["BIC_naive"])
                 result["MinGE"] = normalize(result_MinGE["MinGE"])
 
-                ax.plot(result["model_n_dims"], result[
-                        "DNML_" + dataset], label="DNML-" + dataset, linestyle="solid", color="black")
+                if dataset=="HGG":
+                    ax.plot(result["model_n_dims"], result[
+                            "DNML_" + dataset], label="DNML-PUD", linestyle="solid", color="black")
+                else:
+                    ax.plot(result["model_n_dims"], result[
+                            "DNML_" + dataset], label="DNML-" + dataset, linestyle="solid", color="black")
                 # ax.plot(result["model_n_dims"], result["AIC_"+dataset],
                 #         label="AIC_"+dataset, color="blue")
                 # ax.plot(result["model_n_dims"], result["BIC_"+dataset],
                 #         label="BIC_"+dataset, color="green")
                 ax.plot(result["model_n_dims"], result["AIC_naive"],
-                        label="AIC_naive", linestyle="dotted", color="black")
+                        label="AIC", linestyle="dotted", color="black")
                 ax.plot(result["model_n_dims"], result["BIC_naive"],
-                        label="BIC_naive", linestyle="dashed", color="black")
+                        label="BIC", linestyle="dashed", color="black")
                 ax.plot(result["model_n_dims"], result[
                     "MinGE"], label="MinGE", linestyle="dashdot", color="black")
                 plt.xscale('log')
@@ -529,9 +533,9 @@ def realworld():
         ax.plot(result["model_n_dims"], result[
                 "DNML_WND"], label="DNML-WND", linestyle=loosely_dotted, color="black")
         ax.plot(result["model_n_dims"], result["AIC_naive"],
-                label="AIC_naive", linestyle="dotted", color="black")
+                label="AIC", linestyle="dotted", color="black")
         ax.plot(result["model_n_dims"], result["BIC_naive"],
-                label="BIC_naive", linestyle="dashed", color="black")
+                label="BIC", linestyle="dashed", color="black")
         ax.plot(result["model_n_dims"], result[
                 "MinGE"], label="MinGE", linestyle="dashdot", color="black")
         plt.xscale('log')
@@ -750,9 +754,9 @@ def result_wn(model_n_dims, dataset_name):
     ax.plot(result["model_n_dims"], result[
             "DNML_WND"], label="DNML-WND", linestyle=loosely_dotted, color="black")
     ax.plot(result["model_n_dims"], result["AIC_naive"],
-            label="AIC_naive", linestyle="dotted", color="black")
+            label="AIC", linestyle="dotted", color="black")
     ax.plot(result["model_n_dims"], result["BIC_naive"],
-            label="BIC_naive", linestyle="dashed", color="black")
+            label="BIC", linestyle="dashed", color="black")
     ax.plot(result["model_n_dims"], result[
             "MinGE"], label="MinGE", linestyle="dashdot", color="black")
     plt.xscale('log')
@@ -879,10 +883,10 @@ if __name__ == "__main__":
     print("Plot Example Figure")
     plot_figure("HGG", 5)
     plot_figure("WND", 3)
-    # print("Results of Artificial Datasets")
-    # artificial("HGG")
-    # artificial("WND")
-    # print("Results of Scientific Collaboration Networks")
-    # realworld()
-    # print("Results of WN dataset")
-    # wn_dataset()
+    print("Results of Artificial Datasets")
+    artificial("HGG")
+    artificial("WND")
+    print("Results of Scientific Collaboration Networks")
+    realworld()
+    print("Results of WN dataset")
+    wn_dataset()

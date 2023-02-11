@@ -44,6 +44,7 @@ def calc_metrics(
 
         # パラメータ
         burn_epochs = 800
+        # burn_epochs = 2
         burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
         n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
         n_max_negatives = n_max_positives * 10
@@ -63,8 +64,6 @@ def calc_metrics(
         eps_1 = 1e-6
         eps_2 = 1e3
         init_range = 0.001
-        perturbation = True
-        change_learning_rate = 100
         # それ以外
         loader_workers = 16
         print("loader_workers: ", loader_workers)
@@ -135,7 +134,6 @@ def calc_metrics(
                     calc_naive=True,
                     calc_othermetrics=True,
                     calc_groundtruth=True,
-                    # perturbation=pertruabtion,
                     loader_workers=16,
                     shuffle=True,
                     sparse=False,
@@ -176,8 +174,6 @@ def calc_metrics(
                     calc_naive=True,
                     calc_othermetrics=True,
                     calc_groundtruth=True,
-                    perturbation=perturbation,
-                    change_learning_rate=change_learning_rate,
                     loader_workers=16,
                     shuffle=True,
                     sparse=False,
@@ -221,8 +217,6 @@ def calc_metrics(
             ret["eps_1"] = eps_1
             ret["eps_2"] = eps_2
             ret["init_range"] = init_range
-            ret["perturbation"] = perturbation
-            ret["change_learning_rate"] = change_learning_rate
 
             row = pd.DataFrame(ret.values(), index=ret.keys()).T
 
@@ -275,9 +269,7 @@ def calc_metrics(
                     "gamma_min",
                     # "eps_1",
                     # "eps_2"
-                    "init_range",
-                    "perturbation",
-                    "change_learning_rate"
+                    "init_range"
                 ]
                 )
             if dataset_name == "WND":
@@ -329,9 +321,7 @@ def calc_metrics(
                     "gamma_min",
                     "eps_1",
                     "eps_2",
-                    "init_range",
-                    "perturbation",
-                    "change_learning_rate"
+                    "init_range"
                 ]
                 )
 
@@ -355,43 +345,21 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
 
-    # 訓練速度を上げるために一時的にmodel_n_dimsをn_nodesでの条件分岐に入れている。
-
-    # if args.n_nodes == "0":
-    #     n_nodes_list = [800, 1600, 3200]
-    #     model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9,
-    #                     10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # elif args.n_nodes == "1":
-    #     n_nodes_list = [6400]
-    #     model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9,
-    #                     10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # elif args.n_nodes == "2":
-    #     n_nodes_list = [6400]
-    #     model_n_dims = [64, 32, 16, 15, 14, 13,
-    #                     12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
-
-    # if args.n_nodes == "0":
-    #     n_nodes_list = [6400]
-    #     model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9,
-    #                     10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # elif args.n_nodes == "1":
-    #     n_nodes_list = [3200]
-    #     model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9,
-    #                     10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # elif args.n_nodes == "2":
-    #     n_nodes_list = [3200]
-    #     model_n_dims = [64, 32, 16, 15, 14, 13,
-    #                     12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
+    # if args.dataset_name == "0":
+    #     dataset_name = "HGG"
+    # elif args.dataset_name == "1":
+    #     dataset_name = "WND"
 
     if args.n_nodes == "0":
-        n_nodes_list = [400, 800, 1600, 3200]
+        n_nodes_list = [400, 800, 6400]
     elif args.n_nodes == "1":
-        n_nodes_list = [6400]
+        n_nodes_list = [3200, 1600]
     elif args.n_nodes == "2":
         n_nodes_list = [12800]
 
-    model_n_dims = [2, 4, 8, 16, 32, 64]
-    # model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
+
+    # model_n_dims = [2, 4, 8, 16, 32, 64]
+    model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
 
     n_partitions = 12
     n_devices = 4

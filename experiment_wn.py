@@ -114,9 +114,8 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
         n_max_samples=int((n_nodes - 1) * 0.1)
     )
 
-    # パラメータ
+    # parameter
     burn_epochs = 800
-    # burn_epochs = 2
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     n_max_negatives = n_max_positives * 10
@@ -124,9 +123,6 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
     lr_epoch_10 = 10.0 * \
         (burn_batch_size * (n_max_positives + n_max_negatives)) / \
         32 / 100  # batchサイズに対応して学習率変更
-    # lr_epoch_10 = 1.0 * \
-    #     (burn_batch_size * (n_max_positives + n_max_negatives)) / \
-    #     32 / 100  # batchサイズに対応して学習率変更
     lr_beta = 0.001
     lr_gamma = 0.001
     sigma_max = 1.0
@@ -152,7 +148,6 @@ def calc_metrics_realworld(device_idx, model_n_dim, dataset_name):
 
     result = pd.DataFrame()
 
-    # ret = LinkPrediction_WN(
     ret = LinkPrediction(
         train_graph=adj_mat,
         positive_samples=None,
@@ -305,31 +300,21 @@ if __name__ == '__main__':
     model_n_dim = int(args.n_dim)
 
     if int(args.dataset) == 0:
-        dataset_name = "animal"
-    elif int(args.dataset) == 1:
         dataset_name = "mammal"
-    elif int(args.dataset) == 2:
-        dataset_name = "group"
-    elif int(args.dataset) == 3:
+    elif int(args.dataset) == 1:
         dataset_name = "solid"
-    elif int(args.dataset) == 4:
+    elif int(args.dataset) == 2:
         dataset_name = "tree"
-    elif int(args.dataset) == 5:
-        dataset_name = "worker"
-    elif int(args.dataset) == 6:
+    elif int(args.dataset) == 3:
+        dataset_name = "worker"        
+    elif int(args.dataset) == 4:
         dataset_name = "adult"
-    elif int(args.dataset) == 7:
-        dataset_name = "fish"
-    elif int(args.dataset) == 8:
-        dataset_name = "leader"
-    elif int(args.dataset) == 9:
+    elif int(args.dataset) == 5:
         dataset_name = "instrument"
-    elif int(args.dataset) == 10:
+    elif int(args.dataset) == 6:
+        dataset_name = "leader"
+    elif int(args.dataset) == 7:
         dataset_name = "implement"
-    elif int(args.dataset) == 11:
-        dataset_name = "commodity"
-    elif int(args.dataset) == 12:
-        dataset_name = "vehicle"
 
     print(dataset_name)
 

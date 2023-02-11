@@ -406,6 +406,21 @@ def create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list):
         print("average degree:", avg_deg)
 
 if __name__ == '__main__':
+    # HGG
+    # true dim 8
+    n_dim_true_list = [8]
+    sigma_list = [0.5, 1.0, 2.0]
+    beta_list = [0.5, 0.6, 0.7, 0.8]
+    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
+
+    # true dim 16
+    n_dim_true_list = [16]
+    sigma_list = [0.5, 1.0, 2.0]
+    beta_list = [0.5, 0.6, 0.7, 0.8]
+    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
+
     # WND
     # true dim 8
     n_dim_true_list = [8]
@@ -414,32 +429,9 @@ if __name__ == '__main__':
     n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
     create_wnds(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
 
-    # # true dim 16
-    # n_dim_true_list = [16]
-    # sigma_list = [0.225, 0.25, 0.275]
-    # beta_list = [0.5, 0.6, 0.7, 0.8]
-    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    # create_wnds(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
-
-    # HGG
-
-    # true dim 4
-    # n_dim_true_list = [4]
-    # sigma_list = [0.5, 1.0, 2.0]
-    # beta_list = [0.5, 0.6, 0.7, 0.8]
-    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    # create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
-
-    # true dim 8
-    # n_dim_true_list = [8]
-    # sigma_list = [0.5, 1.0, 2.0]
-    # beta_list = [0.5, 0.6, 0.7, 0.8]
-    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    # create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
-
-    # # true dim 16
-    # n_dim_true_list = [16]
-    # sigma_list = [0.5, 1.0, 2.0]
-    # beta_list = [0.5, 0.6, 0.7, 0.8]
-    # n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
-    # create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
+    # true dim 16
+    n_dim_true_list = [16]
+    sigma_list = [0.225, 0.25, 0.275]
+    beta_list = [0.5, 0.6, 0.7, 0.8]
+    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    create_wnds(n_dim_true_list, n_nodes_list, sigma_list, beta_list)

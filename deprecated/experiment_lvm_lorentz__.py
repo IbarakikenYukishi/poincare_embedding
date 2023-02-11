@@ -44,6 +44,7 @@ def calc_metrics(
 
         # パラメータ
         burn_epochs = 800
+        # burn_epochs = 2
         burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
         n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
         n_max_negatives = n_max_positives * 10
@@ -63,8 +64,6 @@ def calc_metrics(
         eps_1 = 1e-6
         eps_2 = 1e3
         init_range = 0.001
-        perturbation = True
-        change_learning_rate = 100
         # それ以外
         loader_workers = 16
         print("loader_workers: ", loader_workers)
@@ -86,112 +85,51 @@ def calc_metrics(
                 calc_HGG = False
                 calc_WND = True
 
-            exist_naive = os.path.exists(RESULTS + "/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
-                                         "_" + str(n_graph) + "_naive.pth")
+            ret = LinkPrediction(
+                train_graph=train_graph,
+                positive_samples=positive_samples,
+                negative_samples=negative_samples,
+                lik_data=lik_data,
+                x_lorentz=x_lorentz,
+                params_dataset=params_dataset,
+                model_n_dim=model_n_dim,
+                burn_epochs=burn_epochs,
+                burn_batch_size=burn_batch_size,
+                n_max_positives=n_max_positives,
+                n_max_negatives=n_max_negatives,
+                lr_embeddings=lr_embeddings,
+                lr_epoch_10=lr_epoch_10,
+                lr_beta=lr_beta,
+                lr_gamma=lr_gamma,
+                sigma_min=sigma_min,
+                sigma_max=sigma_max,
+                beta_min=beta_min,
+                beta_max=beta_max,
+                gamma_min=gamma_min,
+                gamma_max=gamma_max,
+                eps_1=eps_1,
+                eps_2=eps_2,
+                init_range=init_range,
+                device=device,
+                calc_HGG=calc_HGG,
+                calc_WND=calc_WND,
+                calc_naive=True,
+                calc_othermetrics=True,
+                calc_groundtruth=True,
+                loader_workers=16,
+                shuffle=True,
+                sparse=False,
+            )
 
-            if exist_naive:
-                print("/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
-                      "_" + str(n_graph) + "_naive.pth", "exists.")
-                model_naive = torch.load(RESULTS + "/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
-                                         "_" + str(n_graph) + "_naive.pth")
+            if dataset_name == "HGG":
+                torch.save(ret["model_hgg"], RESULTS + "/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
+                           "_" + str(n_graph) + "_hgg.pth")
+            elif dataset_name == "WND":
+                torch.save(ret["model_wnd"], RESULTS + "/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
+                           "_" + str(n_graph) + "_wnd.pth")
 
-                if calc_HGG:
-                    model_latent = torch.load(RESULTS + "/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
-                                              "_" + str(n_graph) + "_hgg.pth")
-                elif calc_WND:
-                    model_latent = torch.load(RESULTS + "/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
-                                              "_" + str(n_graph) + "_wnd.pth")
-
-                ret = calc_criteria(
-                    model_latent=model_latent,
-                    model_naive=model_naive,
-                    train_graph=train_graph,
-                    positive_samples=positive_samples,
-                    negative_samples=negative_samples,
-                    lik_data=lik_data,
-                    x_lorentz=x_lorentz,
-                    params_dataset=params_dataset,
-                    model_n_dim=model_n_dim,
-                    burn_epochs=burn_epochs,
-                    burn_batch_size=burn_batch_size,
-                    n_max_positives=n_max_positives,
-                    n_max_negatives=n_max_negatives,
-                    lr_embeddings=lr_embeddings,
-                    lr_epoch_10=lr_epoch_10,
-                    lr_beta=lr_beta,
-                    lr_gamma=lr_gamma,
-                    sigma_min=sigma_min,
-                    sigma_max=sigma_max,
-                    beta_min=beta_min,
-                    beta_max=beta_max,
-                    gamma_min=gamma_min,
-                    gamma_max=gamma_max,
-                    eps_1=eps_1,
-                    eps_2=eps_2,
-                    init_range=init_range,
-                    device=device,
-                    calc_HGG=calc_HGG,
-                    calc_WND=calc_WND,
-                    calc_naive=True,
-                    calc_othermetrics=True,
-                    calc_groundtruth=True,
-                    # perturbation=pertruabtion,
-                    loader_workers=16,
-                    shuffle=True,
-                    sparse=False,
-                )
-
-            else:
-                print("/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
-                      "_" + str(n_graph) + "_naive.pth", "does not exist.")
-
-                ret = LinkPrediction(
-                    train_graph=train_graph,
-                    positive_samples=positive_samples,
-                    negative_samples=negative_samples,
-                    lik_data=lik_data,
-                    x_lorentz=x_lorentz,
-                    params_dataset=params_dataset,
-                    model_n_dim=model_n_dim,
-                    burn_epochs=burn_epochs,
-                    burn_batch_size=burn_batch_size,
-                    n_max_positives=n_max_positives,
-                    n_max_negatives=n_max_negatives,
-                    lr_embeddings=lr_embeddings,
-                    lr_epoch_10=lr_epoch_10,
-                    lr_beta=lr_beta,
-                    lr_gamma=lr_gamma,
-                    sigma_min=sigma_min,
-                    sigma_max=sigma_max,
-                    beta_min=beta_min,
-                    beta_max=beta_max,
-                    gamma_min=gamma_min,
-                    gamma_max=gamma_max,
-                    eps_1=eps_1,
-                    eps_2=eps_2,
-                    init_range=init_range,
-                    device=device,
-                    calc_HGG=calc_HGG,
-                    calc_WND=calc_WND,
-                    calc_naive=True,
-                    calc_othermetrics=True,
-                    calc_groundtruth=True,
-                    perturbation=perturbation,
-                    change_learning_rate=change_learning_rate,
-                    loader_workers=16,
-                    shuffle=True,
-                    sparse=False,
-                )
-
-                if dataset_name == "HGG":
-                    torch.save(ret["model_hgg"], RESULTS + "/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
-                               "_" + str(n_graph) + "_hgg.pth")
-                elif dataset_name == "WND":
-                    torch.save(ret["model_wnd"], RESULTS + "/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
-                               "_" + str(n_graph) + "_wnd.pth")
-
-                torch.save(ret["model_naive"], RESULTS + "/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
-                           "_" + str(n_graph) + "_naive.pth")
+            torch.save(ret["model_naive"], RESULTS + "/" + dataset_name + "/dim_" + str(n_dim) + "/result_" + str(model_n_dim) + "_" + str(n_nodes) +
+                       "_" + str(n_graph) + "_naive.pth")
 
             ret.pop('model_hgg')
             ret.pop('model_wnd')
@@ -221,8 +159,6 @@ def calc_metrics(
             ret["eps_1"] = eps_1
             ret["eps_2"] = eps_2
             ret["init_range"] = init_range
-            ret["perturbation"] = perturbation
-            ret["change_learning_rate"] = change_learning_rate
 
             row = pd.DataFrame(ret.values(), index=ret.keys()).T
 
@@ -275,9 +211,7 @@ def calc_metrics(
                     "gamma_min",
                     # "eps_1",
                     # "eps_2"
-                    "init_range",
-                    "perturbation",
-                    "change_learning_rate"
+                    "init_range"
                 ]
                 )
             if dataset_name == "WND":
@@ -329,9 +263,7 @@ def calc_metrics(
                     "gamma_min",
                     "eps_1",
                     "eps_2",
-                    "init_range",
-                    "perturbation",
-                    "change_learning_rate"
+                    "init_range"
                 ]
                 )
 
@@ -355,43 +287,18 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
 
-    # 訓練速度を上げるために一時的にmodel_n_dimsをn_nodesでの条件分岐に入れている。
-
-    # if args.n_nodes == "0":
-    #     n_nodes_list = [800, 1600, 3200]
-    #     model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9,
-    #                     10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # elif args.n_nodes == "1":
-    #     n_nodes_list = [6400]
-    #     model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9,
-    #                     10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # elif args.n_nodes == "2":
-    #     n_nodes_list = [6400]
-    #     model_n_dims = [64, 32, 16, 15, 14, 13,
-    #                     12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
-
-    # if args.n_nodes == "0":
-    #     n_nodes_list = [6400]
-    #     model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9,
-    #                     10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # elif args.n_nodes == "1":
-    #     n_nodes_list = [3200]
-    #     model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9,
-    #                     10, 11, 12, 13, 14, 15, 16, 32, 64]
-    # elif args.n_nodes == "2":
-    #     n_nodes_list = [3200]
-    #     model_n_dims = [64, 32, 16, 15, 14, 13,
-    #                     12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
+    # if args.dataset_name == "0":
+    #     dataset_name = "HGG"
+    # elif args.dataset_name == "1":
+    #     dataset_name = "WND"
 
     if args.n_nodes == "0":
-        n_nodes_list = [400, 800, 1600, 3200]
+        n_nodes_list = [1600, 3200, 6400]
     elif args.n_nodes == "1":
-        n_nodes_list = [6400]
-    elif args.n_nodes == "2":
-        n_nodes_list = [12800]
+        n_nodes_list = [400, 800, 12800]
 
-    model_n_dims = [2, 4, 8, 16, 32, 64]
-    # model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
+    # model_n_dims = [2, 4, 8, 16, 32, 64]
+    model_n_dims = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
 
     n_partitions = 12
     n_devices = 4

@@ -30,14 +30,7 @@ nouns['weight'] = 1
 
 # create datasets
 os.makedirs("./dataset/wn_dataset/", exist_ok=True)
-# dataset_names = ["animal", "mammal", "group", "solid", "tree", "worker"]
-# dataset_names = ["family", "object"]
-# dataset_names = ["person", "plant", "fish"]
-# dataset_names = ["adult"]
-# dataset_names = ["traveler", "leader", "writer"]
-# dataset_names = ["artifact", "instrument", "city", "location", "clothing", "tool"]
-# dataset_names = ["device"]
-dataset_names = ["implement", "commodity", "vehicle"]
+dataset_names = ["mammal", "solid", "tree", "worker", "adult", "leader", "instrument", "implement"]
 
 for dataset_name in dataset_names:
     # Extract the set of nouns that have the word as a hypernym
