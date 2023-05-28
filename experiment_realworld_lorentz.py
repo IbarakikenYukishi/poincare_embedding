@@ -261,6 +261,14 @@ if __name__ == '__main__':
         dataset_name = "ca-GrQc"
     elif int(args.dataset) == 3:
         dataset_name = "ca-HepPh"
+    elif int(args.dataset) == 4:
+        dataset_name = "airport"
+    elif int(args.dataset) == 5:
+        dataset_name = "cora"
+    elif int(args.dataset) == 6:
+        dataset_name = "pubmed"
+    elif int(args.dataset) == 7:
+        dataset_name = "bio-yeast-protein-inter"        
 
     os.makedirs(RESULTS + "/" + dataset_name, exist_ok=True)
 
