@@ -284,7 +284,6 @@ if __name__ == "__main__":
     dataset_list = ["HGG", "WND"]
     n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
     n_dim_list = [2, 4, 8, 16, 32, 64]
-    # n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
     n_graphs = 12
     weight_entropy = 1.0
     MinGE_artificial_dataset(
@@ -300,7 +299,16 @@ if __name__ == "__main__":
     print("Link Prediction")
     n_dim_list = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64]
     weight_entropy = 1.0
-    dataset_name_list = ["ca-AstroPh", "ca-HepPh", "ca-CondMat", "ca-GrQc"]
+    dataset_name_list = [
+        "ca-AstroPh",
+        "ca-CondMat",
+        "ca-GrQc",
+        "ca-HepPh",
+        "airport",
+        "cora",
+        "bio-yeast-protein-inter",
+        "pubmed"
+    ]
     MinGE_link_prediction(
         dataset_name_list=dataset_name_list,
         n_dim_list=n_dim_list,
