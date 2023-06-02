@@ -35,7 +35,8 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
 
     params_dataset = {
         'n_nodes': n_nodes,
-        'R': np.log(n_nodes),
+        'R': np.log(n_nodes) + 4,
+        # 'R': max(np.log(n_nodes), 12.0),
     }
 
     # パラメータ
@@ -268,7 +269,7 @@ if __name__ == '__main__':
     elif int(args.dataset) == 6:
         dataset_name = "pubmed"
     elif int(args.dataset) == 7:
-        dataset_name = "bio-yeast-protein-inter"        
+        dataset_name = "bio-yeast-protein-inter"
 
     os.makedirs(RESULTS + "/" + dataset_name, exist_ok=True)
 
