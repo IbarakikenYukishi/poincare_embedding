@@ -411,14 +411,14 @@ if __name__ == '__main__':
     n_dim_true_list = [8]
     sigma_list = [0.5, 1.0, 2.0]
     beta_list = [0.5, 0.6, 0.7, 0.8]
-    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    n_nodes_list = [400, 800, 1600, 3200, 6400]
     create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
 
     # true dim 16
     n_dim_true_list = [16]
     sigma_list = [0.5, 1.0, 2.0]
     beta_list = [0.5, 0.6, 0.7, 0.8]
-    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    n_nodes_list = [400, 800, 1600, 3200, 6400]
     create_hggs(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
 
     # WND
@@ -426,12 +426,12 @@ if __name__ == '__main__':
     n_dim_true_list = [8]
     sigma_list = [0.35, 0.375, 0.40]
     beta_list = [0.5, 0.6, 0.7, 0.8]
-    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    n_nodes_list = [400, 800, 1600, 3200, 6400]
     create_wnds(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
 
     # true dim 16
     n_dim_true_list = [16]
     sigma_list = [0.225, 0.25, 0.275]
     beta_list = [0.5, 0.6, 0.7, 0.8]
-    n_nodes_list = [400, 800, 1600, 3200, 6400, 12800]
+    n_nodes_list = [400, 800, 1600, 3200, 6400]
     create_wnds(n_dim_true_list, n_nodes_list, sigma_list, beta_list)
