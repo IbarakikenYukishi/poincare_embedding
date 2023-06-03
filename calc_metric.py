@@ -1025,7 +1025,7 @@ if __name__ == "__main__":
     # artificial("HGG")
     # artificial("WND")
     print("Results of Scientific Collaboration Networks")
-    # realworld_stats()
+    realworld_stats()
     realworld()
     # print("Results of WN dataset")
     # wn_dataset()
