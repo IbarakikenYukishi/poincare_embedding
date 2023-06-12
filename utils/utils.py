@@ -517,6 +517,220 @@ def plot_figure_training(adj_mat, tables_hgg, tables_wnd, tables_naive, suffix):
     create_gif(tables_naive, suffix + "test_naive.gif")
 
 
+def approx_W_k(Sigma, k, sample_size):
+    dim = Sigma.shape[0]
+    points = np.random.multivariate_normal(np.zeros(dim), Sigma, sample_size)
+    # print(points.shape)
+    dists = np.linalg.norm(points, axis=1)
+    # print(dists)
+    ratio = len(np.where(dists <= np.pi / np.sqrt(k))[0]) / sample_size
+    # ratio = len(np.where(dists <= 2)[0]) / sample_size
+
+    return ratio
+
+
+def approx_v_jk(Sigma, k, sample_size):
+    dim = Sigma.shape[0]
+    points = np.random.multivariate_normal(np.zeros(dim), Sigma, sample_size)
+    # print(points.shape)
+    dists = np.linalg.norm(points, axis=1)
+    # print(dists)
+    points_2 = points * points
+    v_jk = np.sum(
+        points_2[np.where(dists <= np.pi / np.sqrt(k))[0], :], axis=0)
+    ret = v_jk / (sample_size * np.diag(Sigma)**2)
+    # ratio = len(np.where(dists <= 2)[0]) / sample_size
+
+    return ret
+
+
+def mle_truncated_normal(points, sigma_min, sigma_max, k, sample_size, n_iter, learning_rate, alpha, early_stopping=100, verbose=False):
+    n_points = points.shape[0]
+    dim = points.shape[1]
+    param_sigma = np.ones(dim) * sigma_min
+    early_stopping_rounds = 0
+    lik_best = 999999999999
+    velocity = 0
+
+    # iteration
+    for t in range(n_iter):
+        # already divided by n_points
+        # momentum
+        gradient = - np.sum(points * points / n_points,
+                            axis=0) / (2 * param_sigma**2)
+        gradient += 1 / (2 * approx_W_k(np.diag(param_sigma), k,
+                                        sample_size)) * approx_v_jk(np.diag(param_sigma), k, sample_size)
+        gradient /= max(np.linalg.norm(gradient), 1)
+        velocity = alpha * velocity - learning_rate * gradient
+        # param_sigma -= learning_rate * gradient
+        param_sigma = param_sigma + velocity
+        param_sigma = np.where(param_sigma > sigma_max, sigma_max, param_sigma)
+        param_sigma = np.where(param_sigma < sigma_min, sigma_min, param_sigma)
+
+        lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + np.sum(points * points.dot((param_sigma**(-1)).reshape(3, 1))) +\
+            n_points * np.log(approx_W_k(np.diag(param_sigma), k, sample_size))
+
+        if verbose:
+            print("sigma:", param_sigma)
+            print(gradient)
+            print("lik:", lik)
+            print("best:", lik_best)
+
+        if lik_best < lik:
+            early_stopping_rounds += 1
+        else:
+            early_stopping_rounds = 0
+            lik_best = lik
+        if early_stopping_rounds >= early_stopping:
+            if verbose:
+                print("early_stopping")
+            break
+    lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + np.sum(points * points.dot((param_sigma**(-1)).reshape(3, 1))) +\
+        n_points * np.log(approx_W_k(np.diag(param_sigma), k, sample_size))
+    return param_sigma, lik
+
+# dim = 3
+# Sigma = np.eye(dim) * 2.5
+# sample_size = 10000
+# k = 1
+# alpha = 0.9
+# points = np.random.multivariate_normal(np.zeros(dim), Sigma, sample_size)
+# dists = np.linalg.norm(points, axis=1)
+# points = points[np.where(dists <= np.pi / np.sqrt(k))[0], :]
+# print(points.shape)
+
+# param_sigma, lik = mle_truncated_normal(
+#     points,
+#     sigma_min=0.001,
+#     sigma_max=100,
+#     k=1,
+#     sample_size=10000,
+#     n_iter=1000000,
+#     learning_rate=0.01,
+#     alpha=0.9
+# )
+# print(param_sigma, lik)
+
+
+# def mle_normal(points, sigma_min, sigma_max, k, sample_size, n_iter, learning_rate, early_stopping=10):
+#     n_points = points.shape[0]
+#     dim = points.shape[1]
+#     param_sigma = np.ones(dim) * sigma_min
+#     early_stopping_rounds = 0
+#     lik_best = 999999999999
+#     # param_sigma = np.diag(points.T.dot(points/n_points))
+#     # print(param_sigma)
+
+#     for t in range(n_iter):
+#         print("sigma:", param_sigma)
+#         # divided by n_points
+#         gradient = 1/(2*param_sigma) - np.sum(points * points/n_points, axis=0) / (2*param_sigma**2)
+#         # gradient -= n_points / (2 * approx_W_k(np.diag(param_sigma), k,
+#         #                                        sample_size)) * approx_v_jk(np.diag(param_sigma), k, sample_size)
+#         # gradient /= n_points
+#         gradient /= max(np.linalg.norm(gradient), 1)
+#         param_sigma -= learning_rate * gradient
+#         param_sigma = np.where(param_sigma > sigma_max, sigma_max, param_sigma)
+#         param_sigma = np.where(param_sigma < sigma_min, sigma_min, param_sigma)
+#         # print(gradient)
+#         # print((n_points / 2) * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))))
+#         # print(np.sum(points*points.dot(param_sigma.reshape(3, 1))))
+#         lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + np.sum(points*points.dot((param_sigma**(-1)).reshape(3, 1)))
+#         # lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + np.sum(points*points.dot(param_sigma.reshape(3, 1)))
+#         print(lik)
+#         if lik_best < lik:
+#             early_stopping_rounds += 1
+#         else:
+#             early_stopping_rounds = 0
+#             lik_best = lik
+#         if early_stopping_rounds >= early_stopping:
+#             break
+
+# dim = 3
+# Sigma = np.eye(dim) * 1
+# sample_size = 10000
+# k = 1
+# points = np.random.multivariate_normal(np.zeros(dim), Sigma, sample_size)
+# # dists = np.linalg.norm(points, axis=1)
+# # points = points[np.where(dists <= np.pi / np.sqrt(k))[0], :]
+# print(points.shape)
+
+# mle_normal(
+#     points,
+#     sigma_min=0.001,
+#     sigma_max=100,
+#     k=1,
+#     sample_size=10000,
+#     n_iter=1000000,
+#     learning_rate=0.01
+# )
+
+
+def calc_ml_with_importance(
+    sigma_min,
+    sigma_max,
+    dim,
+    k,
+    sample_size,
+    n_iter,
+    learning_rate,
+    alpha,
+    early_stopping=100
+):
+    # uniform with respect to angle
+    points = np.random.multivariate_normal(
+        np.zeros(dim), np.eye(dim), sample_size)
+    print(points)
+    norm = np.linalg.norm(points, axis=1).reshape((-1, 1))
+    print(norm)
+    points = points/norm
+    R = np.pi / np.sqrt(k)
+    r = R * np.power(np.random.uniform(0, 1, size=sample_size), 1/dim).reshape((sample_size, 1))
+    points = points*r
+    print(points)
+    print(r)
+    print(points)
+    # points = points[np.where(dists <= np.pi / np.sqrt(k))[0], :]
+
+    # param_sigma, lik = mle_truncated_normal(
+    #     points,
+    #     sigma_min=0.001,
+    #     sigma_max=100,
+    #     k=1,
+    #     sample_size=10000,
+    #     n_iter=1000000,
+    #     learning_rate=0.01,
+    #     alpha=0.9
+    # )
+
+calc_ml_with_importance(
+    sigma_min=0.001,
+    sigma_max=100,
+    dim=4,
+    k=1,
+    sample_size=20,
+    n_iter=10000,
+    learning_rate=0.0001,
+    alpha=0.9,
+    early_stopping=100
+)
+
+
+# def calc_spherical_complexity(
+#     n_points,
+#     n_dims,
+#     sample_size_n,
+#     sigma_min,
+#     sigma_max,
+#     k,
+#     sample_size,
+#     n_iter,
+#     learning_rate,
+#     alpha,
+#     early_stopping=100
+# ):
+
+
 def plot_figure(adj_mat, table, path):
     # skip padding. plot x y
 
@@ -550,382 +764,403 @@ def plot_figure(adj_mat, table, path):
     plt.close()
 
 
-if __name__ == "__main__":
-    # All of the functions assumes the curvature of hyperbolic space is 1.
-    # arcosh
-    print("--------arcosh--------")
-    x = torch.cosh(torch.Tensor([0., 2., 4., 8.]))
-    print(arcosh(x))
-    print(arcosh(x.numpy(), use_torch=False))
+# if __name__ == "__main__":
+#     # All of the functions assumes the curvature of hyperbolic space is 1.
+#     # arcosh
+#     print("--------arcosh--------")
+#     x = torch.cosh(torch.Tensor([0., 2., 4., 8.]))
+#     print(arcosh(x))
+#     print(arcosh(x.numpy(), use_torch=False))
 
-    # lorentz scalar product
-    x = torch.Tensor([
-        [1, 3, 0, 5],
-        [-1, 2, 3, 0]
-    ]
-    )
-    y = torch.Tensor([
-        [5, 2, -1, 2],
-        [8, 0, 1, 0]
-    ]
-    )
+#     # lorentz scalar product
+#     x = torch.Tensor([
+#         [1, 3, 0, 5],
+#         [-1, 2, 3, 0]
+#     ]
+#     )
+#     y = torch.Tensor([
+#         [5, 2, -1, 2],
+#         [8, 0, 1, 0]
+#     ]
+#     )
 
-    print(lorentz_scalar_product(x, y))
-    print(lorentz_scalar_product(x.numpy(), y.numpy(), use_torch=False))
+#     print(lorentz_scalar_product(x, y))
+#     print(lorentz_scalar_product(x.numpy(), y.numpy(), use_torch=False))
 
-    # h_dist
-    print("--------h_dist--------")
-    x = torch.Tensor([
-        [1, 0, 0, 0],
-        [1, 0, 0, 0],
-        [1, 0, 0, 0]
-    ]
-    )
-    y = torch.Tensor([
-        [np.cosh(10), np.sinh(10), 0, 0],
-        [np.cosh(10), 0, np.sinh(10), 0],
-        [np.cosh(10), 0, 0, np.sinh(10)]
-    ]
-    )
-    print(h_dist(x, y))
-    print(h_dist(x.numpy(), y.numpy(), use_torch=False))
+#     # h_dist
+#     print("--------h_dist--------")
+#     x = torch.Tensor([
+#         [1, 0, 0, 0],
+#         [1, 0, 0, 0],
+#         [1, 0, 0, 0]
+#     ]
+#     )
+#     y = torch.Tensor([
+#         [np.cosh(10), np.sinh(10), 0, 0],
+#         [np.cosh(10), 0, np.sinh(10), 0],
+#         [np.cosh(10), 0, 0, np.sinh(10)]
+#     ]
+#     )
+#     print(h_dist(x, y))
+#     print(h_dist(x.numpy(), y.numpy(), use_torch=False))
 
-    # tangent norm
-    print("--------tangent norm--------")
-    x = torch.Tensor([
-        [1, 2, -1, 0],
-        [-1, 1, 2, 1],
-        [1, -3, 1, 2]
-    ]
-    )
-    print(tangent_norm(x))
-    print(tangent_norm(x.numpy(), use_torch=False))
+#     # tangent norm
+#     print("--------tangent norm--------")
+#     x = torch.Tensor([
+#         [1, 2, -1, 0],
+#         [-1, 1, 2, 1],
+#         [1, -3, 1, 2]
+#     ]
+#     )
+#     print(tangent_norm(x))
+#     print(tangent_norm(x.numpy(), use_torch=False))
 
-    # exp map
-    print("--------exp map--------")
-    x = torch.Tensor([
-        [1, 0, 0, 0],
-        [1, 0, 0, 0],
-        [1, 0, 0, 0]
-    ]
-    )
-    v = torch.Tensor([
-        [0, np.sinh(1), 0, 0],
-        [0, 0, np.sinh(1), 0],
-        [0, 0, 0, np.sinh(1)]
-    ]
-    )
+#     # exp map
+#     print("--------exp map--------")
+#     x = torch.Tensor([
+#         [1, 0, 0, 0],
+#         [1, 0, 0, 0],
+#         [1, 0, 0, 0]
+#     ]
+#     )
+#     v = torch.Tensor([
+#         [0, np.sinh(1), 0, 0],
+#         [0, 0, np.sinh(1), 0],
+#         [0, 0, 0, np.sinh(1)]
+#     ]
+#     )
 
-    print(exp_map(x, v))
+#     print(exp_map(x, v))
 
-    # log map
-    print("--------log map--------")
-    x = torch.Tensor([
-        [1, 0, 0, 0],
-        [1, 0, 0, 0],
-        [1, 0, 0, 0]
-    ]
-    )
-    v = torch.Tensor([
-        [0, np.sinh(1), 0, 0],
-        [0, 0, np.sinh(1), 0],
-        [0, 0, 0, np.sinh(1)]
-    ]
-    )
+#     # log map
+#     print("--------log map--------")
+#     x = torch.Tensor([
+#         [1, 0, 0, 0],
+#         [1, 0, 0, 0],
+#         [1, 0, 0, 0]
+#     ]
+#     )
+#     v = torch.Tensor([
+#         [0, np.sinh(1), 0, 0],
+#         [0, 0, np.sinh(1), 0],
+#         [0, 0, 0, np.sinh(1)]
+#     ]
+#     )
 
-    print(log_map(exp_map(x, v), x))
+#     print(log_map(exp_map(x, v), x))
 
-    # set_dim0
-    print("--------set_dim0--------")
-    x = torch.Tensor([
-        [1, 2, -1, 0],
-        [-1, 1, 2, 1],
-        [1, -3, 1, 2]
-    ]
-    )
-    print(set_dim0(x, R=3))
+#     # set_dim0
+#     print("--------set_dim0--------")
+#     x = torch.Tensor([
+#         [1, 2, -1, 0],
+#         [-1, 1, 2, 1],
+#         [1, -3, 1, 2]
+#     ]
+#     )
+#     print(set_dim0(x, R=3))
 
-    # set_dim0
-    print("--------projection_k--------")
-    x = torch.Tensor([
-        [1, 2, -1, 0],
-        [-1, 1, 2, 1],
-        [1, -3, 1, 2]
-    ]
-    )
-    print(projection_k(x, R=3, k=-1))
-    print(projection_k(x * np.sqrt(2), R=3, k=-1 / 2))
-    x = torch.Tensor([
-        [1, 1],
-        [-1, -1],
-        [4, -4]
-    ]
-    )
-    print(projection_k(x, k=1))
-    print(projection_k(x * np.sqrt(2), k=1 / 2))
+#     # set_dim0
+#     print("--------projection_k--------")
+#     x = torch.Tensor([
+#         [1, 2, -1, 0],
+#         [-1, 1, 2, 1],
+#         [1, -3, 1, 2]
+#     ]
+#     )
+#     print(projection_k(x, R=3, k=-1))
+#     print(projection_k(x * np.sqrt(2), R=3, k=-1 / 2))
+#     x = torch.Tensor([
+#         [1, 1],
+#         [-1, -1],
+#         [4, -4]
+#     ]
+#     )
+#     print(projection_k(x, k=1))
+#     print(projection_k(x * np.sqrt(2), k=1 / 2))
 
-    # sin_K, cos_K, arcos_k
-    print("--------sin_k, cos_k, arcos_k--------")
-    print(sin_k(np.pi / 2, 1, use_torch=False))
-    print(cos_k(np.pi / 2, 1, use_torch=False))
-    print(arcos_k(cos_k(np.pi / 2, 1, use_torch=False), 1, use_torch=False))
-    print(sin_k(np.pi / 2, -1, use_torch=False))
-    print(cos_k(np.pi / 2, -1, use_torch=False))
-    print(arcos_k(cos_k(np.pi / 2, -1, use_torch=False), -1, use_torch=False))
+#     # sin_K, cos_K, arcos_k
+#     print("--------sin_k, cos_k, arcos_k--------")
+#     print(sin_k(np.pi / 2, 1, use_torch=False))
+#     print(cos_k(np.pi / 2, 1, use_torch=False))
+#     print(arcos_k(cos_k(np.pi / 2, 1, use_torch=False), 1, use_torch=False))
+#     print(sin_k(np.pi / 2, -1, use_torch=False))
+#     print(cos_k(np.pi / 2, -1, use_torch=False))
+#     print(arcos_k(cos_k(np.pi / 2, -1, use_torch=False), -1, use_torch=False))
 
-    print(sin_k(torch.tensor(np.pi / 2), 1))
-    print(cos_k(torch.tensor(np.pi / 2), 1))
-    print(arcos_k(cos_k(torch.tensor(np.pi / 2), 1), 1))
-    print(sin_k(torch.tensor(np.pi / 2), -1))
-    print(cos_k(torch.tensor(np.pi / 2), -1))
-    print(arcos_k(cos_k(torch.tensor(np.pi / 2), -1), -1))
+#     print(sin_k(torch.tensor(np.pi / 2), 1))
+#     print(cos_k(torch.tensor(np.pi / 2), 1))
+#     print(arcos_k(cos_k(torch.tensor(np.pi / 2), 1), 1))
+#     print(sin_k(torch.tensor(np.pi / 2), -1))
+#     print(cos_k(torch.tensor(np.pi / 2), -1))
+#     print(arcos_k(cos_k(torch.tensor(np.pi / 2), -1), -1))
 
-    print(sin_k(np.pi / 4, 1, use_torch=False))
-    print(cos_k(np.pi / 4, 1, use_torch=False))
-    print(arcos_k(cos_k(np.pi / 4, 1, use_torch=False), 1, use_torch=False))
-    print(sin_k(np.pi / 4, -1, use_torch=False))
-    print(cos_k(np.pi / 4, -1, use_torch=False))
-    print(arcos_k(cos_k(np.pi / 4, -1, use_torch=False), -1, use_torch=False))
+#     print(sin_k(np.pi / 4, 1, use_torch=False))
+#     print(cos_k(np.pi / 4, 1, use_torch=False))
+#     print(arcos_k(cos_k(np.pi / 4, 1, use_torch=False), 1, use_torch=False))
+#     print(sin_k(np.pi / 4, -1, use_torch=False))
+#     print(cos_k(np.pi / 4, -1, use_torch=False))
+#     print(arcos_k(cos_k(np.pi / 4, -1, use_torch=False), -1, use_torch=False))
 
-    print(sin_k(torch.tensor(np.pi / 4), 1))
-    print(cos_k(torch.tensor(np.pi / 4), 1))
-    print(arcos_k(cos_k(torch.tensor(np.pi / 4), 1), 1))
-    print(sin_k(torch.tensor(np.pi / 4), -1))
-    print(cos_k(torch.tensor(np.pi / 4), -1))
-    print(arcos_k(cos_k(torch.tensor(np.pi / 4), -1), -1))
+#     print(sin_k(torch.tensor(np.pi / 4), 1))
+#     print(cos_k(torch.tensor(np.pi / 4), 1))
+#     print(arcos_k(cos_k(torch.tensor(np.pi / 4), 1), 1))
+#     print(sin_k(torch.tensor(np.pi / 4), -1))
+#     print(cos_k(torch.tensor(np.pi / 4), -1))
+#     print(arcos_k(cos_k(torch.tensor(np.pi / 4), -1), -1))
 
-    # dist_k
-    print("--------dist_k--------")
-    # spherical case
-    x = torch.tensor([
-        [1.0, 0.0],
-        [0.0, 1.0],
-        [1.0, 0.0],
-        [0.0, 1.0],
-        [1.0, 0]
-    ])
-    y = torch.tensor([
-        [0.0, 1.0],
-        [1.0, 0.0],
-        [-1.0, 0.0],
-        [0.0, -1.0],
-        [np.sqrt(2) / 2, np.sqrt(2) / 2]
-    ])
-    print(dist_k(x, y, k=1))
-    print(dist_k(x * np.sqrt(2), y * np.sqrt(2), k=1 / 2))
-    print(dist_k(x * np.sqrt(3), y * np.sqrt(3), k=1 / 3))
-    print(dist_k(x.numpy(), y.numpy(), k=1, use_torch=False))
-    print(dist_k(x.numpy() * np.sqrt(2), y.numpy()
-                 * np.sqrt(2), k=1 / 2, use_torch=False))
-    print(dist_k(x.numpy() * np.sqrt(3), y.numpy()
-                 * np.sqrt(3), k=1 / 3, use_torch=False))
+#     # dist_k
+#     print("--------dist_k--------")
+#     # spherical case
+#     x = torch.tensor([
+#         [1.0, 0.0],
+#         [0.0, 1.0],
+#         [1.0, 0.0],
+#         [0.0, 1.0],
+#         [1.0, 0]
+#     ])
+#     y = torch.tensor([
+#         [0.0, 1.0],
+#         [1.0, 0.0],
+#         [-1.0, 0.0],
+#         [0.0, -1.0],
+#         [np.sqrt(2) / 2, np.sqrt(2) / 2]
+#     ])
+#     print(dist_k(x, y, k=1))
+#     print(dist_k(x * np.sqrt(2), y * np.sqrt(2), k=1 / 2))
+#     print(dist_k(x * np.sqrt(3), y * np.sqrt(3), k=1 / 3))
+#     print(dist_k(x.numpy(), y.numpy(), k=1, use_torch=False))
+#     print(dist_k(x.numpy() * np.sqrt(2), y.numpy()
+#                  * np.sqrt(2), k=1 / 2, use_torch=False))
+#     print(dist_k(x.numpy() * np.sqrt(3), y.numpy()
+#                  * np.sqrt(3), k=1 / 3, use_torch=False))
 
-    # Euclidean case
-    x = torch.tensor([
-        [1.0, 0.0],
-        [0.0, 1.0],
-        [1.0, 0.0],
-        [0.0, 1.0],
-        [1.0, 0]
-    ])
-    y = torch.tensor([
-        [0.0, 1.0],
-        [1.0, 0.0],
-        [-1.0, 0.0],
-        [0.0, -1.0],
-        [np.sqrt(2) / 2, np.sqrt(2) / 2]
-    ])
-    print(dist_k(x, y, k=0))
-    print(dist_k(x * np.sqrt(2), y * np.sqrt(2), k=0))
-    print(dist_k(x * np.sqrt(3), y * np.sqrt(3), k=0))
-    print(dist_k(x.numpy(), y.numpy(), k=0, use_torch=False))
-    print(dist_k(x.numpy() * np.sqrt(2), y.numpy()
-                 * np.sqrt(2), k=0, use_torch=False))
-    print(dist_k(x.numpy() * np.sqrt(3), y.numpy()
-                 * np.sqrt(3), k=0, use_torch=False))
+#     # Euclidean case
+#     x = torch.tensor([
+#         [1.0, 0.0],
+#         [0.0, 1.0],
+#         [1.0, 0.0],
+#         [0.0, 1.0],
+#         [1.0, 0]
+#     ])
+#     y = torch.tensor([
+#         [0.0, 1.0],
+#         [1.0, 0.0],
+#         [-1.0, 0.0],
+#         [0.0, -1.0],
+#         [np.sqrt(2) / 2, np.sqrt(2) / 2]
+#     ])
+#     print(dist_k(x, y, k=0))
+#     print(dist_k(x * np.sqrt(2), y * np.sqrt(2), k=0))
+#     print(dist_k(x * np.sqrt(3), y * np.sqrt(3), k=0))
+#     print(dist_k(x.numpy(), y.numpy(), k=0, use_torch=False))
+#     print(dist_k(x.numpy() * np.sqrt(2), y.numpy()
+#                  * np.sqrt(2), k=0, use_torch=False))
+#     print(dist_k(x.numpy() * np.sqrt(3), y.numpy()
+#                  * np.sqrt(3), k=0, use_torch=False))
 
-    # hyperbolic case
-    x = torch.tensor([
-        [1.0, 0.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0, 0.0]
-    ]
-    )
-    y = torch.Tensor([
-        [np.cosh(10.0), np.sinh(10.0), 0.0, 0.0],
-        [np.cosh(10.0), 0.0, np.sinh(10.0), 0.0],
-        [np.cosh(10.0), 0.0, 0.0, np.sinh(10.0)]
-    ]
-    )
-    print(dist_k(x, y, k=-1))
-    print(dist_k(x * np.sqrt(2), y * np.sqrt(2), k=-1 / 2))
-    print(dist_k(x * np.sqrt(3), y * np.sqrt(3), k=-1 / 3))
-    print(dist_k(x.numpy(), y.numpy(), k=-1, use_torch=False))
-    print(dist_k(x.numpy() * np.sqrt(2), y.numpy()
-                 * np.sqrt(2), k=-1 / 2, use_torch=False))
-    print(dist_k(x.numpy() * np.sqrt(3), y.numpy()
-                 * np.sqrt(3), k=-1 / 3, use_torch=False))
+#     # hyperbolic case
+#     x = torch.tensor([
+#         [1.0, 0.0, 0.0, 0.0],
+#         [1.0, 0.0, 0.0, 0.0],
+#         [1.0, 0.0, 0.0, 0.0]
+#     ]
+#     )
+#     y = torch.Tensor([
+#         [np.cosh(10.0), np.sinh(10.0), 0.0, 0.0],
+#         [np.cosh(10.0), 0.0, np.sinh(10.0), 0.0],
+#         [np.cosh(10.0), 0.0, 0.0, np.sinh(10.0)]
+#     ]
+#     )
+#     print(dist_k(x, y, k=-1))
+#     print(dist_k(x * np.sqrt(2), y * np.sqrt(2), k=-1 / 2))
+#     print(dist_k(x * np.sqrt(3), y * np.sqrt(3), k=-1 / 3))
+#     print(dist_k(x.numpy(), y.numpy(), k=-1, use_torch=False))
+#     print(dist_k(x.numpy() * np.sqrt(2), y.numpy()
+#                  * np.sqrt(2), k=-1 / 2, use_torch=False))
+#     print(dist_k(x.numpy() * np.sqrt(3), y.numpy()
+#                  * np.sqrt(3), k=-1 / 3, use_torch=False))
 
-    # tangent norm
-    print("--------tangent norm_k--------")
-    x = torch.Tensor([
-        [1, 2, -1, 0],
-        [-1, 1, 2, 1],
-        [1, -3, 1, 2]
-    ]
-    )
-    print(tangent_norm_k(x, k=-1))
-    print(tangent_norm_k(x.numpy(), k=-1, use_torch=False))
-    print(tangent_norm_k(x, k=0))
-    print(tangent_norm_k(x.numpy(), k=0, use_torch=False))
-    print(tangent_norm_k(x, k=1))
-    print(tangent_norm_k(x.numpy(), k=1, use_torch=False))
+#     # tangent norm
+#     print("--------tangent norm_k--------")
+#     x = torch.Tensor([
+#         [1, 2, -1, 0],
+#         [-1, 1, 2, 1],
+#         [1, -3, 1, 2]
+#     ]
+#     )
+#     print(tangent_norm_k(x, k=-1))
+#     print(tangent_norm_k(x.numpy(), k=-1, use_torch=False))
+#     print(tangent_norm_k(x, k=0))
+#     print(tangent_norm_k(x.numpy(), k=0, use_torch=False))
+#     print(tangent_norm_k(x, k=1))
+#     print(tangent_norm_k(x.numpy(), k=1, use_torch=False))
 
-    # exp map
-    print("--------exp_map_k and log_map_k--------")
-    # hyperbolic case
-    x = torch.Tensor([
-        [1, 0, 0, 0],
-        [1, 0, 0, 0],
-        [1, 0, 0, 0]
-    ]
-    )
-    v = torch.Tensor([
-        [0, np.sinh(1), 0, 0],
-        [0, 0, np.sinh(1), 0],
-        [0, 0, 0, np.sinh(1)]
-    ]
-    )
-    print(exp_map_k(x, v, k=-1))
-    print(exp_map_k(x * np.sqrt(2), v * np.sqrt(2), k=-1 / 2))
-    print(exp_map_k(x * np.sqrt(3), v * np.sqrt(3), k=-1 / 3))
-    # Euclidean case
-    print(exp_map_k(x, v, k=0))
-    # spherical case
-    x = torch.Tensor([
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1]
-    ]
-    )
-    v = torch.Tensor([
-        [0, np.pi / 2],
-        [0, np.pi / 2],
-        [np.pi / 2, 0],
-        [np.pi / 2, 0],
-        [0, np.pi / 4],
-        [0, np.pi / 4],
-        [np.pi / 4, 0],
-        [np.pi / 4, 0],
-        [0, np.pi / 2 + 2 * np.pi],
-        [0, np.pi / 2 + 2 * np.pi],
-        [np.pi / 2 + 2 * np.pi, 0],
-        [np.pi / 2 + 2 * np.pi, 0],
-        [0, np.pi / 4 + 2 * np.pi],
-        [0, np.pi / 4 + 2 * np.pi],
-        [np.pi / 4 + 2 * np.pi, 0],
-        [np.pi / 4 + 2 * np.pi, 0]
-    ]
-    )
-    print(exp_map_k(x, v, k=1))
-    print(exp_map_k(x * np.sqrt(2), v * np.sqrt(2), k=1 / 2))
-    print(exp_map_k(x * np.sqrt(3), v * np.sqrt(3), k=1 / 3))
-    print(log_map_k(exp_map_k(x, v, k=1), x, k=1))
-    print(log_map_k(exp_map_k(x * np.sqrt(2), v * np.sqrt(2), k=1 / 2), x, k=1 / 2))
-    print(log_map_k(exp_map_k(x * np.sqrt(3), v * np.sqrt(3), k=1 / 3), x, k=1 / 3))
-    x = torch.Tensor([
-        [1, 0, 0, 0],
-        [-1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, -1, 0, 0],
-        [1, 0, 0, 0],
-        [-1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, -1, 0, 0],
-        [1, 0, 0, 0],
-        [-1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, -1, 0, 0],
-        [1, 0, 0, 0],
-        [-1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, -1, 0, 0]
-    ]
-    )
-    v = torch.Tensor([
-        [0, np.pi / 2, 0, 0],
-        [0, np.pi / 2, 0, 0],
-        [np.pi / 2, 0, 0, 0],
-        [np.pi / 2, 0, 0, 0],
-        [0, np.pi / 4, 0, 0],
-        [0, np.pi / 4, 0, 0],
-        [np.pi / 4, 0, 0, 0],
-        [np.pi / 4, 0, 0, 0],
-        [0, np.pi / 2 + 2 * np.pi, 0, 0],
-        [0, np.pi / 2 + 2 * np.pi, 0, 0],
-        [np.pi / 2 + 2 * np.pi, 0, 0, 0],
-        [np.pi / 2 + 2 * np.pi, 0, 0, 0],
-        [0, np.pi / 4 + 2 * np.pi, 0, 0],
-        [0, np.pi / 4 + 2 * np.pi, 0, 0],
-        [np.pi / 4 + 2 * np.pi, 0, 0, 0],
-        [np.pi / 4 + 2 * np.pi, 0, 0, 0]
-    ]
-    )
-    print(exp_map_k(x, v, k=1))
-    print(exp_map_k(x * np.sqrt(2), v * np.sqrt(2), k=1 / 2))
-    print(exp_map_k(x * np.sqrt(3), v * np.sqrt(3), k=1 / 3))
-    x = torch.Tensor([
-        [1, 0],
-        [1, 0],
-        [1, 0],
-        [1, 0],
-        [1, 0],
-        [1, 0],
-        [1, 0],
-        [1, 0]
-    ]
-    )
-    v = torch.Tensor([
-        [0, 1e-1],
-        [0, 1e-2],
-        [0, 1e-3],
-        [0, 1e-4],
-        [0, 1e-5],
-        [0, 1e-6],
-        [0, 1e-7],
-        [0, 1e-8]
-    ]
-    )
-    print(exp_map_k(x, v, k=1))
+#     # exp map
+#     print("--------exp_map_k and log_map_k--------")
+#     # hyperbolic case
+#     x = torch.Tensor([
+#         [1, 0, 0, 0],
+#         [1, 0, 0, 0],
+#         [1, 0, 0, 0]
+#     ]
+#     )
+#     v = torch.Tensor([
+#         [0, np.sinh(1), 0, 0],
+#         [0, 0, np.sinh(1), 0],
+#         [0, 0, 0, np.sinh(1)]
+#     ]
+#     )
+#     print(exp_map_k(x, v, k=-1))
+#     print(exp_map_k(x * np.sqrt(2), v * np.sqrt(2), k=-1 / 2))
+#     print(exp_map_k(x * np.sqrt(3), v * np.sqrt(3), k=-1 / 3))
+#     # Euclidean case
+#     print(exp_map_k(x, v, k=0))
+#     # spherical case
+#     x = torch.Tensor([
+#         [1, 0],
+#         [-1, 0],
+#         [0, 1],
+#         [0, -1],
+#         [1, 0],
+#         [-1, 0],
+#         [0, 1],
+#         [0, -1],
+#         [1, 0],
+#         [-1, 0],
+#         [0, 1],
+#         [0, -1],
+#         [1, 0],
+#         [-1, 0],
+#         [0, 1],
+#         [0, -1]
+#     ]
+#     )
+#     v = torch.Tensor([
+#         [0, np.pi / 2],
+#         [0, np.pi / 2],
+#         [np.pi / 2, 0],
+#         [np.pi / 2, 0],
+#         [0, np.pi / 4],
+#         [0, np.pi / 4],
+#         [np.pi / 4, 0],
+#         [np.pi / 4, 0],
+#         [0, np.pi / 2 + 2 * np.pi],
+#         [0, np.pi / 2 + 2 * np.pi],
+#         [np.pi / 2 + 2 * np.pi, 0],
+#         [np.pi / 2 + 2 * np.pi, 0],
+#         [0, np.pi / 4 + 2 * np.pi],
+#         [0, np.pi / 4 + 2 * np.pi],
+#         [np.pi / 4 + 2 * np.pi, 0],
+#         [np.pi / 4 + 2 * np.pi, 0]
+#     ]
+#     )
+#     print(exp_map_k(x, v, k=1))
+#     print(exp_map_k(x * np.sqrt(2), v * np.sqrt(2), k=1 / 2))
+#     print(exp_map_k(x * np.sqrt(3), v * np.sqrt(3), k=1 / 3))
+#     print(log_map_k(exp_map_k(x, v, k=1), x, k=1))
+#     print(log_map_k(exp_map_k(x * np.sqrt(2), v * np.sqrt(2), k=1 / 2), x, k=1 / 2))
+#     print(log_map_k(exp_map_k(x * np.sqrt(3), v * np.sqrt(3), k=1 / 3), x, k=1 / 3))
+#     x = torch.Tensor([
+#         [1, 0, 0, 0],
+#         [-1, 0, 0, 0],
+#         [0, 1, 0, 0],
+#         [0, -1, 0, 0],
+#         [1, 0, 0, 0],
+#         [-1, 0, 0, 0],
+#         [0, 1, 0, 0],
+#         [0, -1, 0, 0],
+#         [1, 0, 0, 0],
+#         [-1, 0, 0, 0],
+#         [0, 1, 0, 0],
+#         [0, -1, 0, 0],
+#         [1, 0, 0, 0],
+#         [-1, 0, 0, 0],
+#         [0, 1, 0, 0],
+#         [0, -1, 0, 0]
+#     ]
+#     )
+#     v = torch.Tensor([
+#         [0, np.pi / 2, 0, 0],
+#         [0, np.pi / 2, 0, 0],
+#         [np.pi / 2, 0, 0, 0],
+#         [np.pi / 2, 0, 0, 0],
+#         [0, np.pi / 4, 0, 0],
+#         [0, np.pi / 4, 0, 0],
+#         [np.pi / 4, 0, 0, 0],
+#         [np.pi / 4, 0, 0, 0],
+#         [0, np.pi / 2 + 2 * np.pi, 0, 0],
+#         [0, np.pi / 2 + 2 * np.pi, 0, 0],
+#         [np.pi / 2 + 2 * np.pi, 0, 0, 0],
+#         [np.pi / 2 + 2 * np.pi, 0, 0, 0],
+#         [0, np.pi / 4 + 2 * np.pi, 0, 0],
+#         [0, np.pi / 4 + 2 * np.pi, 0, 0],
+#         [np.pi / 4 + 2 * np.pi, 0, 0, 0],
+#         [np.pi / 4 + 2 * np.pi, 0, 0, 0]
+#     ]
+#     )
+#     print(exp_map_k(x, v, k=1))
+#     print(exp_map_k(x * np.sqrt(2), v * np.sqrt(2), k=1 / 2))
+#     print(exp_map_k(x * np.sqrt(3), v * np.sqrt(3), k=1 / 3))
+#     x = torch.Tensor([
+#         [1, 0],
+#         [1, 0],
+#         [1, 0],
+#         [1, 0],
+#         [1, 0],
+#         [1, 0],
+#         [1, 0],
+#         [1, 0]
+#     ]
+#     )
+#     v = torch.Tensor([
+#         [0, 1e-1],
+#         [0, 1e-2],
+#         [0, 1e-3],
+#         [0, 1e-4],
+#         [0, 1e-5],
+#         [0, 1e-6],
+#         [0, 1e-7],
+#         [0, 1e-8]
+#     ]
+#     )
+#     print(exp_map_k(x, v, k=1))
 
-    # calc_log_C_D
-    print("--------calc_log_C_D--------")
-    # R*sigma>=1
-    print(calc_log_C_D(n_dim=64, R=10, sigma=1))
-    print(calc_log_C_D(n_dim=32, R=7, sigma=0.5))
-    print(calc_log_C_D(n_dim=16, R=9, sigma=1.5))
-    print(calc_log_C_D(n_dim=2, R=10, sigma=2))
-    # R*sigma<1
-    # wolfram alphaの出力などと比べると正しくない
-    print(calc_log_C_D(n_dim=64, R=10, sigma=0.00001))
-    print(calc_log_C_D(n_dim=32, R=7, sigma=0.00001))
-    print(calc_log_C_D(n_dim=16, R=9, sigma=0.00001))
-    print(calc_log_C_D(n_dim=2, R=10, sigma=0.00001))
+#     # calc_log_C_D
+#     print("--------calc_log_C_D--------")
+#     # R*sigma>=1
+#     print(calc_log_C_D(n_dim=64, R=10, sigma=1))
+#     print(calc_log_C_D(n_dim=32, R=7, sigma=0.5))
+#     print(calc_log_C_D(n_dim=16, R=9, sigma=1.5))
+#     print(calc_log_C_D(n_dim=2, R=10, sigma=2))
+#     # R*sigma<1
+#     # wolfram alphaの出力などと比べると正しくない
+#     print(calc_log_C_D(n_dim=64, R=10, sigma=0.00001))
+#     print(calc_log_C_D(n_dim=32, R=7, sigma=0.00001))
+#     print(calc_log_C_D(n_dim=16, R=9, sigma=0.00001))
+#     print(calc_log_C_D(n_dim=2, R=10, sigma=0.00001))
 
-    print(calc_log_C_D(n_dim=64, R=10, sigma=0.1))
-    print(calc_log_C_D(n_dim=32, R=7, sigma=0.1))
-    print(calc_log_C_D(n_dim=16, R=9, sigma=0.1))
-    print(calc_log_C_D(n_dim=2, R=10, sigma=0.1))
+#     print(calc_log_C_D(n_dim=64, R=10, sigma=0.1))
+#     print(calc_log_C_D(n_dim=32, R=7, sigma=0.1))
+#     print(calc_log_C_D(n_dim=16, R=9, sigma=0.1))
+#     print(calc_log_C_D(n_dim=2, R=10, sigma=0.1))
+
+#     print(approx_W_k(np.array([
+#         [1, 0, 0],
+#         [0, 1, 0],
+#         [0, 0, 1]
+#     ]), 1, 1000))
+#     print(approx_W_k(np.array([
+#         [(np.pi / 2)**2],
+#     ]), 1, 1000000))
+#     print(approx_W_k(np.array([
+#         [(np.pi / 3)**2],
+#     ]), 1, 1000000))
+#     print(approx_W_k(np.array([
+#         [(np.pi / 2)**2, 0, 0],
+#         [0, (np.pi / 2)**2, 0],
+#         [0, 0, (np.pi / 2)**2]
+#     ]), 1, 1000))
+#     print(approx_W_k(np.array([
+#         [1, 0],
+#         [0, 1]
+#     ]), 1, 1000))
