@@ -22,53 +22,6 @@ import sys
 import pickle as pkl
 from scipy.sparse import coo_matrix
 
-# # airport dataset
-# os.makedirs("dataset/airport", exist_ok=True)
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/raw/master/data/airport/airport.p", out="dataset/airport")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/raw/master/data/airport/airport_alldata.p", out="dataset/airport")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/raw/master/data/airport/routes.dat", out="dataset/airport")
-
-# # pubmed dataset
-# os.makedirs("dataset/pubmed", exist_ok=True)
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/pubmed/ind.pubmed.allx", out="dataset/pubmed")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/pubmed/ind.pubmed.ally", out="dataset/pubmed")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/pubmed/ind.pubmed.graph", out="dataset/pubmed")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/pubmed/ind.pubmed.test.index", out="dataset/pubmed")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/pubmed/ind.pubmed.tx", out="dataset/pubmed")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/pubmed/ind.pubmed.ty", out="dataset/pubmed")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/pubmed/ind.pubmed.x", out="dataset/pubmed")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/pubmed/ind.pubmed.y", out="dataset/pubmed")
-
-# # cora dataset
-# os.makedirs("dataset/cora", exist_ok=True)
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/cora/ind.cora.allx", out="dataset/cora")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/cora/ind.cora.ally", out="dataset/cora")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/cora/ind.cora.graph", out="dataset/cora")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/cora/ind.cora.test.index", out="dataset/cora")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/cora/ind.cora.tx", out="dataset/cora")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/cora/ind.cora.ty", out="dataset/cora")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/cora/ind.cora.x", out="dataset/cora")
-# wget.download(
-#     "https://github.com/HazyResearch/hgcn/blob/master/data/cora/ind.cora.y", out="dataset/cora")
-
 
 def load_data_airport(dataset_str, data_path, return_label=False):
     graph = pkl.load(open(os.path.join(data_path, dataset_str + '.p'), 'rb'))
