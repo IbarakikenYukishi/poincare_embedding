@@ -15,19 +15,25 @@ The implementation assumes the availability of CUDA device.
 ### Artificial Dataset
 1. Execute `python datasets.py` to generate artificial datasets.
 
-2. Execute `python experiment_lvm_lorentz.py X Y Z W`, where X \in {HGG, WND} is the possible datasets (HGG means PUD here), Y \in {8, 16} is the true dimensionality, and Z is the CUDA device in which the program runs, and W \in {1, 2, ..., 12}. The variables X, Y, and, W should be taken for all possible values.
+2. Execute `python experiment_lvm_lorentz.py X Y Z W`, where X \in {HGG, WND} is the possible datasets (HGG means PUD here), Y \in {8, 16} is the true dimensionality, and Z \in {0, 1, 2, 3, 4} indicates the number of nodes 2^(Z+2)*100, and W \in {1, 2, ..., 12}. The variables X, Y, Z, and, W should be taken for all possible values.
 
 ### Real-world Dataset
 
-1. Download the dataset from the URLs below. Then, put the txt files in `dataset/ca-AstroPh`, `dataset/ca-CondMat`, `dataset/ca-GrQc`, and `dataset/ca-HepPh`.
+1. Download the dataset from the URLs below. Then, put the txt files in `dataset/ca-AstroPh`, `dataset/ca-CondMat`, `dataset/ca-GrQc`, `dataset/ca-HepPh`, and the .graph and .p files in `dataset/cora`, `dataset/pubmed`, `dataset/airport`, and `dataset/bio-yeast-protein-inter`.
 - AstroPh: https://snap.stanford.edu/data/ca-AstroPh.html
 - CondMat: https://snap.stanford.edu/data/ca-CondMat.html
 - GrQc: https://snap.stanford.edu/data/ca-GrQc.html
 - HepPh: https://snap.stanford.edu/data/ca-HepPh.html
+- Cora: https://github.com/HazyResearch/hgcn/blob/master/data/cora/ind.cora.graph
+- PubMed: https://github.com/HazyResearch/hgcn/blob/master/data/pubmed/ind.pubmed.graph
+- Airport: https://github.com/HazyResearch/hgcn/raw/master/data/airport/airport.p
+- PPI(bio-yeast-protein-inter): https://networkrepository.com/bio-yeast-protein-inter.php
 
 2. Execute `python transitive_closure.py`
 
-3. Execute `python experiment_realworld_lorentz.py X Y Z`, where X \in {0, 1, 2, 3} is the id of the dataset (i.e, 0: AstroPh, 1:HepPh, 2: CondMat, and 3: GrQc), Y \in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64} is the model dimensionality, and Z is the CUDA device in which the program runs. The combinations of X and Y are taken to be all possible ones.
+3. Execute `python network_datasets.py`
+
+3. Execute `python experiment_realworld_lorentz.py X Y Z`, where X \in {0, 1, 2, 3} is the id of the dataset (i.e, 0: AstroPh, 1:HepPh, 2: CondMat, 3: GrQc, 4:Airport, 5: Cora, 6: PubMed, and 7: PPI), Y \in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64} is the model dimensionality, and Z is the CUDA device in which the program runs. The combinations of X and Y are taken to be all possible ones.
 
 4. Execute `python experiment_wn.py X Y Z`, where X \in {0, 1, ..., 7} is the associated number of WN datasets (e.g., zero is associated with WN-mammal), Y is the model dimensionality, and Z is the CUDA device in which the program runs.
 
