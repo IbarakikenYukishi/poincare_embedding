@@ -121,7 +121,8 @@ def artificial(dataset):
                 # bene_AIC_latent.append(
                 #     label_ranking_average_precision_score([label], [-result["AIC_" + dataset].values]))
                 # bene_BIC_latent.append(
-                #     label_ranking_average_precision_score([label], [-result["BIC_" + dataset].values]))
+                # label_ranking_average_precision_score([label],
+                # [-result["BIC_" + dataset].values]))
                 bene_DNML_HGG.append(
                     label_ranking_average_precision_score([label], [-result["DNML_HGG"].values]))
                 bene_AIC_HGG.append(
@@ -177,12 +178,17 @@ def artificial(dataset):
                 result["BIC_naive"] = normalize(result["BIC_naive"])
                 result["MinGE"] = normalize(result_MinGE["MinGE"])
 
-                if dataset == "HGG":
-                    ax.plot(result["model_n_dims"], result[
-                            "DNML_" + dataset], label="DNML-PUD", linestyle="solid", color="black")
-                else:
-                    ax.plot(result["model_n_dims"], result[
-                            "DNML_" + dataset], label="DNML-" + dataset, linestyle="solid", color="black")
+                # if dataset == "HGG":
+                #     ax.plot(result["model_n_dims"], result[
+                #             "DNML_" + dataset], label="DNML-PUD", linestyle="solid", color="black")
+                # else:
+                #     ax.plot(result["model_n_dims"], result[
+                #             "DNML_" + dataset], label="DNML-" + dataset, linestyle="solid", color="black")
+                ax.plot(result["model_n_dims"], result[
+                        "DNML_HGG"], label="DNML-PUD", linestyle="solid", color="black")
+                ax.plot(result["model_n_dims"], result[
+                        "DNML_WND"], label="DNML-WND", linestyle=loosely_dotted, color="black")
+
                 # ax.plot(result["model_n_dims"], result["AIC_"+dataset],
                 #         label="AIC_"+dataset, color="blue")
                 # ax.plot(result["model_n_dims"], result["BIC_"+dataset],
@@ -605,6 +611,7 @@ def realworld():
                 label="-log p(y|z; β, γ)", linestyle="dashed", color="black")
         plt.xscale('log')
         plt.ylim(0.6, 1.00)
+        # plt.ylim(0.4, 0.80)
         # plt.xticks(result["model_n_dims"], fontsize=8)
 
         plt.xticks([2, 4, 8, 16, 32, 64], fontsize=20)
@@ -662,11 +669,13 @@ def realworld():
                     "/result_" + dataset_name + ".png")
 
     print(result_conciseness)
-    result_conciseness.to_csv(RESULTS+"/result_realworld.csv", index=False)
+    result_conciseness.to_csv(RESULTS + "/result_realworld.csv", index=False)
     print(result_conciseness.groupby("dataset_name").mean().drop("eps", axis=1))
-    result_conciseness.groupby("dataset_name").mean().drop("eps", axis=1).to_csv(RESULTS+"/result_realworld_dataset.csv")
+    result_conciseness.groupby("dataset_name").mean().drop(
+        "eps", axis=1).to_csv(RESULTS + "/result_realworld_dataset.csv")
     print(result_conciseness.groupby("eps").mean())
-    result_conciseness.groupby("eps").mean().to_csv(RESULTS+"/result_realworld_eps.csv", index=False)
+    result_conciseness.groupby("eps").mean().to_csv(
+        RESULTS + "/result_realworld_eps.csv", index=False)
     # print(result_conciseness.mean().T)
 
 
@@ -1009,7 +1018,7 @@ def realworld_stats():
                        '/data.npy', allow_pickle=True).item()
         adj_mat = data["adj_mat"].toarray()
         n_nodes = adj_mat.shape[0]
-        n_edges = np.sum(adj_mat)/2
+        n_edges = np.sum(adj_mat) / 2
 
         print(dataset_name)
         print("# nodes:", n_nodes)
@@ -1021,11 +1030,11 @@ if __name__ == "__main__":
     # print("Plot Example Figure")
     # plot_figure("HGG", 5)
     # plot_figure("WND", 3)
-    # print("Results of Artificial Datasets")
-    # artificial("HGG")
-    # artificial("WND")
+    print("Results of Artificial Datasets")
+    artificial("HGG")
+    artificial("WND")
     print("Results of Scientific Collaboration Networks")
-    realworld_stats()
+    # realworld_stats()
     realworld()
     # print("Results of WN dataset")
     # wn_dataset()
