@@ -41,7 +41,7 @@ The implementation assumes the availability of CUDA device.
 
 ### Results
 
-1. Run `calc_metric.py`. For artificial dataset, selected dimensionality and metrics are shown in command line. For scientific collaboration networks, selected dimensionalities and AUC are shown in command line. For WN dataset, the selected dimensionalities and best dimensionalities are shown in command line. At the same time, the figures of each criterion are generated in `results`.
+1. Run `calc_metric.py`. For artificial dataset, selected dimensionality and metrics are shown in command line. For link prediction, selected dimensionalities and AUC are shown in command line. For WN dataset, the selected dimensionalities and best dimensionalities are shown in command line. At the same time, the figures of each criterion are generated in `results`.
 
 ## 4. Author & Mail address
 Ryo Yuki
