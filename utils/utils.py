@@ -26,6 +26,7 @@ from scipy import stats, special
 from sklearn.linear_model import LogisticRegression
 # import matplotlib.animation as animation
 from matplotlib.animation import ArtistAnimation
+from multiprocessing import Pool, current_process
 
 np.random.seed(0)
 
@@ -520,31 +521,34 @@ def plot_figure_training(adj_mat, tables_hgg, tables_wnd, tables_naive, suffix):
 def approx_W_k(Sigma, k, sample_size):
     dim = Sigma.shape[0]
     points = np.random.multivariate_normal(np.zeros(dim), Sigma, sample_size)
-    # print(points.shape)
     dists = np.linalg.norm(points, axis=1)
-    # print(dists)
     ratio = len(np.where(dists <= np.pi / np.sqrt(k))[0]) / sample_size
-    # ratio = len(np.where(dists <= 2)[0]) / sample_size
-
     return ratio
 
 
 def approx_v_jk(Sigma, k, sample_size):
     dim = Sigma.shape[0]
     points = np.random.multivariate_normal(np.zeros(dim), Sigma, sample_size)
-    # print(points.shape)
     dists = np.linalg.norm(points, axis=1)
-    # print(dists)
     points_2 = points * points
     v_jk = np.sum(
         points_2[np.where(dists <= np.pi / np.sqrt(k))[0], :], axis=0)
     ret = v_jk / (sample_size * np.diag(Sigma)**2)
-    # ratio = len(np.where(dists <= 2)[0]) / sample_size
-
     return ret
 
 
-def mle_truncated_normal(points, sigma_min, sigma_max, k, sample_size, n_iter, learning_rate, alpha, early_stopping=100, verbose=False):
+def mle_truncated_normal(
+    points,
+    sigma_min,
+    sigma_max,
+    k,
+    sample_size,
+    n_iter,
+    learning_rate,
+    alpha,
+    early_stopping=100,
+    verbose=False
+):
     n_points = points.shape[0]
     dim = points.shape[1]
     param_sigma = np.ones(dim) * sigma_min
@@ -567,7 +571,7 @@ def mle_truncated_normal(points, sigma_min, sigma_max, k, sample_size, n_iter, l
         param_sigma = np.where(param_sigma > sigma_max, sigma_max, param_sigma)
         param_sigma = np.where(param_sigma < sigma_min, sigma_min, param_sigma)
 
-        lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + np.sum(points * points.dot((param_sigma**(-1)).reshape(3, 1))) +\
+        lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + 0.5 * np.sum((points * points).dot((param_sigma**(-1)).reshape(dim, 1))) +\
             n_points * np.log(approx_W_k(np.diag(param_sigma), k, sample_size))
 
         if verbose:
@@ -576,7 +580,7 @@ def mle_truncated_normal(points, sigma_min, sigma_max, k, sample_size, n_iter, l
             print("lik:", lik)
             print("best:", lik_best)
 
-        if lik_best < lik:
+        if lik_best <= lik:
             early_stopping_rounds += 1
         else:
             early_stopping_rounds = 0
@@ -585,12 +589,13 @@ def mle_truncated_normal(points, sigma_min, sigma_max, k, sample_size, n_iter, l
             if verbose:
                 print("early_stopping")
             break
-    lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + np.sum(points * points.dot((param_sigma**(-1)).reshape(3, 1))) +\
+    lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + 0.5 * np.sum((points * points).dot((param_sigma**(-1)).reshape(dim, 1))) +\
         n_points * np.log(approx_W_k(np.diag(param_sigma), k, sample_size))
+
     return param_sigma, lik
 
 # dim = 3
-# Sigma = np.eye(dim) * 2.5
+# Sigma = np.eye(dim) * 1
 # sample_size = 10000
 # k = 1
 # alpha = 0.9
@@ -607,128 +612,227 @@ def mle_truncated_normal(points, sigma_min, sigma_max, k, sample_size, n_iter, l
 #     sample_size=10000,
 #     n_iter=1000000,
 #     learning_rate=0.01,
-#     alpha=0.9
+#     alpha=0.9,
+#     early_stopping=100,
+#     verbose=True
 # )
 # print(param_sigma, lik)
 
 
-# def mle_normal(points, sigma_min, sigma_max, k, sample_size, n_iter, learning_rate, early_stopping=10):
-#     n_points = points.shape[0]
-#     dim = points.shape[1]
-#     param_sigma = np.ones(dim) * sigma_min
-#     early_stopping_rounds = 0
-#     lik_best = 999999999999
-#     # param_sigma = np.diag(points.T.dot(points/n_points))
-#     # print(param_sigma)
+def mle_normal(
+    points,
+    sigma_min,
+    sigma_max,
+    k,
+    sample_size,
+    n_iter,
+    learning_rate,
+    alpha,
+    early_stopping=100,
+    verbose=False,
+):
+    n_points = points.shape[0]
+    dim = points.shape[1]
+    param_sigma = np.ones(dim) * sigma_min
+    early_stopping_rounds = 0
+    lik_best = 999999999999
+    # param_sigma = np.diag(points.T.dot(points/n_points))
+    # print(param_sigma)
+    velocity = 0
 
-#     for t in range(n_iter):
-#         print("sigma:", param_sigma)
-#         # divided by n_points
-#         gradient = 1/(2*param_sigma) - np.sum(points * points/n_points, axis=0) / (2*param_sigma**2)
-#         # gradient -= n_points / (2 * approx_W_k(np.diag(param_sigma), k,
-#         #                                        sample_size)) * approx_v_jk(np.diag(param_sigma), k, sample_size)
-#         # gradient /= n_points
-#         gradient /= max(np.linalg.norm(gradient), 1)
-#         param_sigma -= learning_rate * gradient
-#         param_sigma = np.where(param_sigma > sigma_max, sigma_max, param_sigma)
-#         param_sigma = np.where(param_sigma < sigma_min, sigma_min, param_sigma)
-#         # print(gradient)
-#         # print((n_points / 2) * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))))
-#         # print(np.sum(points*points.dot(param_sigma.reshape(3, 1))))
-#         lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + np.sum(points*points.dot((param_sigma**(-1)).reshape(3, 1)))
-#         # lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + np.sum(points*points.dot(param_sigma.reshape(3, 1)))
-#         print(lik)
-#         if lik_best < lik:
-#             early_stopping_rounds += 1
-#         else:
-#             early_stopping_rounds = 0
-#             lik_best = lik
-#         if early_stopping_rounds >= early_stopping:
-#             break
+    for t in range(n_iter):
+        # divided by n_points
+        gradient = 1 / (2 * param_sigma) - np.sum(points *
+                                                  points / n_points, axis=0) / (2 * param_sigma**2)
+        # gradient -= n_points / (2 * approx_W_k(np.diag(param_sigma), k,
+        #                                        sample_size)) * approx_v_jk(np.diag(param_sigma), k, sample_size)
+        # gradient /= n_points
+        gradient /= max(np.linalg.norm(gradient), 1)
+        velocity = alpha * velocity - learning_rate * gradient
+        param_sigma = param_sigma + velocity
+        # param_sigma -= learning_rate * gradient
+        param_sigma = np.where(param_sigma > sigma_max, sigma_max, param_sigma)
+        param_sigma = np.where(param_sigma < sigma_min, sigma_min, param_sigma)
+        # print(gradient)
+        # print((n_points / 2) * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))))
+        # print(np.sum(points*points.dot(param_sigma.reshape(3, 1))))
+        lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + \
+            0.5 * \
+            np.sum((points * points).dot((param_sigma**(-1)).reshape(dim, 1)))
+        # lik = n_points / 2 * (np.log(2 * np.pi) + np.sum(np.log(param_sigma))) + np.sum(points*points.dot(param_sigma.reshape(3, 1)))
+        if verbose:
+            print("sigma:", param_sigma)
+            print(lik)
+        if lik_best <= lik:
+            early_stopping_rounds += 1
+        else:
+            early_stopping_rounds = 0
+            lik_best = lik
+        if early_stopping_rounds >= early_stopping:
+            if verbose:
+                print("early_stopping")
+            break
+    return param_sigma, lik_best
 
 # dim = 3
-# Sigma = np.eye(dim) * 1
+# Sigma = np.eye(dim) * 2
 # sample_size = 10000
 # k = 1
 # points = np.random.multivariate_normal(np.zeros(dim), Sigma, sample_size)
-# # dists = np.linalg.norm(points, axis=1)
-# # points = points[np.where(dists <= np.pi / np.sqrt(k))[0], :]
 # print(points.shape)
 
-# mle_normal(
+# param_sigma, lik = mle_normal(
 #     points,
 #     sigma_min=0.001,
 #     sigma_max=100,
 #     k=1,
 #     sample_size=10000,
 #     n_iter=1000000,
+#     alpha=0.9,
 #     learning_rate=0.01
 # )
+# print(lik)
 
 
 def calc_ml_with_importance(
+    i,
+    dim,  # 次元D
+    sample_size,  # ノード数n
+    # n_samples,  # parametric complexityを近似するサンプル数
     sigma_min,
     sigma_max,
-    dim,
     k,
-    sample_size,
     n_iter,
     learning_rate,
     alpha,
+    sample_size_for_W,
     early_stopping=100
 ):
+    np.random.seed(i)  # シード値を設定
+
     # uniform with respect to angle
     points = np.random.multivariate_normal(
         np.zeros(dim), np.eye(dim), sample_size)
-    print(points)
     norm = np.linalg.norm(points, axis=1).reshape((-1, 1))
-    print(norm)
-    points = points/norm
+    points = points / norm
     R = np.pi / np.sqrt(k)
-    r = R * np.power(np.random.uniform(0, 1, size=sample_size), 1/dim).reshape((sample_size, 1))
-    points = points*r
-    print(points)
-    print(r)
-    print(points)
-    # points = points[np.where(dists <= np.pi / np.sqrt(k))[0], :]
+    r = R * np.power(np.random.uniform(0, 1, size=sample_size),
+                     1 / dim).reshape((sample_size, 1))
+    points = points * r
 
-    # param_sigma, lik = mle_truncated_normal(
+    _, lik = mle_truncated_normal(
+        points,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        k=k,
+        sample_size=sample_size_for_W,
+        n_iter=n_iter,
+        learning_rate=learning_rate,
+        alpha=alpha,
+        early_stopping=early_stopping,
+        # verbose=True
+    )
+    # _, lik = mle_normal(
     #     points,
+    #     sigma_min=sigma_min,
+    #     sigma_max=sigma_max,
+    #     k=k,
+    #     sample_size=sample_size_for_W,
+    #     n_iter=n_iter,
+    #     learning_rate=learning_rate,
+    #     alpha=alpha,
+    #     early_stopping=early_stopping,
+    #     # verbose=True
+    # )
+    return lik
+
+
+def calc_spherical_complexity(
+    dim,  # 次元D
+    sample_size,  # ノード数n
+    n_samples,  # parametric complexityを近似するサンプル数
+    sigma_min,
+    sigma_max,
+    k,
+    n_iter,
+    learning_rate,
+    alpha,
+    sample_size_for_W=100,
+    early_stopping=100
+):
+    calc_ml_with_importance_ = partial(
+        calc_ml_with_importance,
+        dim=dim,
+        sample_size=sample_size,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        k=k,
+        n_iter=n_iter,
+        learning_rate=learning_rate,
+        alpha=alpha,
+        sample_size_for_W=sample_size_for_W,
+        early_stopping=early_stopping
+    )
+    liks = []
+    # print(multi.cpu_count())
+    p = Pool(1)
+    with tqdm(total=n_samples)as t:
+        for lik in p.imap_unordered(calc_ml_with_importance_, range(n_samples)):
+            t.update(1)
+            liks.append(lik)
+    # print(liks)
+    liks = np.array(liks)
+    # liks_max = np.max(liks)
+    # liks /= liks_max
+    R = np.pi / np.sqrt(k)
+    # parametric_complexity = - np.log(n_samples) + sample_size * (0.5 * (dim) * np.log(np.pi) + (
+    # dim) * np.log(R) - multigamma_ln(dim / 2 + 1, 1)) + np.log(liks_max) +
+    # np.log(np.sum(liks))
+    parametric_complexity = - np.log(n_samples) + sample_size * (0.5 * (dim) * np.log(np.pi) + (
+        dim) * np.log(R) - special.gammaln(dim / 2 + 1)) + special.logsumexp(-liks)
+    # np.log(liks_max) + np.log(np.sum(liks))
+
+    print(parametric_complexity)
+    # print(sample_size * (0.5 * (dim) * np.log(np.pi) + (
+    #     dim ) * np.log(R) - multigamma_ln((dim) / 2 + 1, 1)))
+    # print(sample_size * (0.5 * (dim) * np.log(np.pi) + (
+    #     dim) * np.log(R) - special.gammaln((dim) / 2 + 1)))
+
+    hyperbolic_pc = dim * (sample_size / 2 * np.log(sample_size / (2 * np.e)) - multigamma_ln(
+        sample_size / 2, 1)) + dim * np.log(np.log(sigma_max) - np.log(sigma_min))
+    print(hyperbolic_pc)
+
+    return parametric_complexity
+    # multiprocessing
+    # liks = p.map(calc_ml_with_importance_, range(n_samples))
+    # print(liks)
+    # lik = calc_ml_with_importance(
+    #     dim=4,
+    #     sample_size=1000,
+    #     # n_samples=1000,
     #     sigma_min=0.001,
     #     sigma_max=100,
     #     k=1,
-    #     sample_size=10000,
-    #     n_iter=1000000,
-    #     learning_rate=0.01,
-    #     alpha=0.9
+    #     n_iter=10000,
+    #     learning_rate=0.0001,
+    #     alpha=0.9,
+    #     early_stopping=100
     # )
+    # print(lik)
 
-calc_ml_with_importance(
-    sigma_min=0.001,
-    sigma_max=100,
-    dim=4,
-    k=1,
-    sample_size=20,
-    n_iter=10000,
-    learning_rate=0.0001,
-    alpha=0.9,
-    early_stopping=100
-)
-
-
-# def calc_spherical_complexity(
-#     n_points,
-#     n_dims,
-#     sample_size_n,
-#     sigma_min,
-#     sigma_max,
-#     k,
-#     sample_size,
-#     n_iter,
-#     learning_rate,
-#     alpha,
+# parametric_complexity = calc_spherical_complexity(
+#     dim=2,
+#     sample_size=16,
+#     n_samples=1000,
+#     sigma_min=0.001,
+#     sigma_max=100,
+#     k=1,
+#     n_iter=10000,
+#     learning_rate=0.0001,
+#     alpha=0.9,
+#     sample_size_for_W=100,
 #     early_stopping=100
-# ):
+# )
 
 
 def plot_figure(adj_mat, table, path):
