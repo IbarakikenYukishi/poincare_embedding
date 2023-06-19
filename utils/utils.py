@@ -12,7 +12,6 @@ from collections import Counter
 from datetime import datetime
 from tensorboardX import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
-# from datasets import hyperbolic_geometric_graph, connection_prob, create_dataset, create_dataset_for_basescore
 from copy import deepcopy
 import torch.multiprocessing as multi
 from functools import partial, lru_cache
@@ -24,9 +23,10 @@ from sklearn import metrics
 import math
 from scipy import stats, special
 from sklearn.linear_model import LogisticRegression
-# import matplotlib.animation as animation
-from matplotlib.animation import ArtistAnimation
+from matplotlib.animation import ArtistAnimation, FuncAnimation
+from mpl_toolkits.mplot3d import Axes3D
 from multiprocessing import Pool, current_process
+from PIL import Image
 
 np.random.seed(0)
 
@@ -41,6 +41,24 @@ plt.style.use("ggplot")
 @lru_cache(maxsize=None)
 def multigamma_ln(a, d):
     return special.multigammaln(a, d)
+
+
+def sqrt_I_n(
+    beta,
+    gamma,
+    X,
+    n_nodes_sample
+):
+    I_1_1 = np.sum(X**2 / ((np.cosh((beta * X - gamma) / 2.0) * 2)
+                           ** 2)) / (n_nodes_sample * (n_nodes_sample - 1))
+    I_1_2 = np.sum(- X / ((np.cosh((beta * X - gamma) / 2.0) * 2)
+                          ** 2)) / (n_nodes_sample * (n_nodes_sample - 1))
+    I_2_2 = 1 / ((np.cosh((beta * X - gamma) / 2.0) * 2)**2)
+    for i in range(n_nodes_sample):
+        I_2_2[i, i] = 0
+    I_2_2 = np.sum(I_2_2) / (n_nodes_sample * (n_nodes_sample - 1))
+
+    return np.sqrt(np.abs(I_1_1 * I_2_2 - I_1_2 * I_1_2))
 
 
 def sin_k(
@@ -268,8 +286,7 @@ def projection_k(
     if k == 0:
         return x
     elif k > 0:
-        x = torch.renorm(x, p=2, dim=0, maxnorm=1 / k)
-        return x
+        return x/torch.norm(x, p=2, dim=1, keepdim=True)
     else:
         x[:, 1:] = torch.renorm(x[:, 1:], p=2, dim=0,
                                 maxnorm=np.sinh(R) / np.sqrt(abs(k)))  # 半径Rの範囲に収めたい
@@ -450,24 +467,74 @@ def calc_beta_hat(z, train_graph, n_samples, R, beta_min, beta_max):
     return max(min(lr.coef_[0, 0], beta_max), beta_min)
 
 
-def plot_figure_training(adj_mat, tables_hgg, tables_wnd, tables_naive, suffix):
-    # diffeomorphism transform to poincare ball
-    # poincares_hgg = []
-    # poincares_wnd = []
-    # poincares_naive = []
+# def plot_figure_training(adj_mat, tables_hgg, tables_wnd, tables_naive, suffix):
+#     # diffeomorphism transform to poincare ball
+#     # poincares_hgg = []
+#     # poincares_wnd = []
+#     # poincares_naive = []
 
-    # for table_hgg in tables_hgg:
-    #     poincares_hgg.append(
-    #         table_hgg[:, 1:] / (table_hgg[:, :1] + 1)
-    #     )
-    # for table_wnd in tables_wnd:
-    #     poincares_wnd.append(
-    #         table_wnd[:, 1:] / (table_wnd[:, :1] + 1)
-    #     )
-    # for table_naive in tables_naive:
-    #     poincares_naive.append(
-    #         table_naive[:, 1:] / (table_naive[:, :1] + 1)
-    #     )
+#     # for table_hgg in tables_hgg:
+#     #     poincares_hgg.append(
+#     #         table_hgg[:, 1:] / (table_hgg[:, :1] + 1)
+#     #     )
+#     # for table_wnd in tables_wnd:
+#     #     poincares_wnd.append(
+#     #         table_wnd[:, 1:] / (table_wnd[:, :1] + 1)
+#     #     )
+#     # for table_naive in tables_naive:
+#     #     poincares_naive.append(
+#     #         table_naive[:, 1:] / (table_naive[:, :1] + 1)
+#     #     )
+
+#     _adj_mat = deepcopy(adj_mat)
+#     for i in range(len(_adj_mat)):
+#         _adj_mat[i, 0:i + 1] = -1
+
+#     edges = np.array(np.where(_adj_mat == 1)).T
+
+#     def create_gif(
+#         tables,
+#         path
+#     ):
+#         fig = plt.figure(figsize=(7, 7))
+#         ax = fig.add_subplot(111)
+
+#         ims = []
+
+#         # print(len(poincares))
+
+#         for table in tables:
+#             # print(poincare)
+#             # plt.clf()
+#             plt.gca().set_xlim(-1, 1)
+#             plt.gca().set_ylim(-1, 1)
+#             plt.gca().add_artist(plt.Circle((0, 0), 1, fill=False, edgecolor="black"))
+
+#             plt_anims = []
+#             # for edge in edges:
+#             #     plt.plot(
+#             #         table[edge, 0],
+#             #         table[edge, 1],
+#             #         color="black",
+#             #         # marker="o",
+#             #         alpha=0.01,
+#             #     )
+
+#             plt_anims.append(plt.scatter(
+#                 table[:, 0], table[:, 1], color="blue"))
+#             # ims.append([plt.scatter(poincare[:, 0], poincare[:, 1], color="blue")])
+#             ims.append(plt_anims)
+
+#         ani = ArtistAnimation(fig, ims, interval=100)
+#         ani.save(path, writer='pillow')
+
+#         plt.clf()
+
+#     create_gif(tables_hgg, suffix + "test_hgg.gif")
+#     create_gif(tables_wnd, suffix + "test_wnd.gif")
+#     create_gif(tables_naive, suffix + "test_naive.gif")
+
+def plot_figure_training(adj_mat, tables_lorentz, tables_euclidean, tables_spherical, suffix):
 
     _adj_mat = deepcopy(adj_mat)
     for i in range(len(_adj_mat)):
@@ -513,9 +580,70 @@ def plot_figure_training(adj_mat, tables_hgg, tables_wnd, tables_naive, suffix):
 
         plt.clf()
 
-    create_gif(tables_hgg, suffix + "test_hgg.gif")
-    create_gif(tables_wnd, suffix + "test_wnd.gif")
-    create_gif(tables_naive, suffix + "test_naive.gif")
+    def create_gif_3d(
+        tables,
+        path
+    ):
+        fig = plt.figure(figsize=(7, 7))
+        ax = fig.add_subplot(111, projection='3d')
+
+        ims = []
+
+        # print(len(poincares))
+
+        # アニメーション更新関数
+        def update(frame):
+            ax.cla()  # プロットをクリア
+            ax.set_xlim3d([-1, 1])  # x軸範囲を設定
+            ax.set_ylim3d([-1, 1])  # y軸範囲を設定
+            ax.set_zlim3d([-1, 1])  # z軸範囲を設定
+            ax.set_title(f'Frame: {frame}')
+            data = tables[frame]  # フレームのデータを取得
+            # 3D散布図をプロット
+            ax.scatter(data[:, 0], data[:, 1], data[:, 2])
+            # プロットを画像に保存
+            fig.canvas.draw()
+            image = Image.frombytes(
+                'RGB', fig.canvas.get_width_height(), fig.canvas.tostring_rgb())
+            return image
+
+        # アニメーションの作成
+        ani = FuncAnimation(
+            fig, update, frames=len(tables), interval=100)
+
+        # アニメーションの保存
+        ani.save(path, writer='pillow')
+
+        # for table in tables:
+        #     # print(poincare)
+        #     # plt.clf()
+        #     plt.gca().set_xlim(-1, 1)
+        #     plt.gca().set_ylim(-1, 1)
+        #     plt.gca().add_artist(plt.Circle((0, 0), 1, fill=False, edgecolor="black"))
+
+        #     plt_anims = []
+        #     # for edge in edges:
+        #     #     plt.plot(
+        #     #         table[edge, 0],
+        #     #         table[edge, 1],
+        #     #         color="black",
+        #     #         # marker="o",
+        #     #         alpha=0.01,
+        #     #     )
+
+        #     plt_anims.append(plt.scatter(
+        #         table[:, 0], table[:, 1], color="blue"))
+        #     # ims.append([plt.scatter(poincare[:, 0], poincare[:, 1], color="blue")])
+        #     ims.append(plt_anims)
+
+        # ani = ArtistAnimation(fig, ims, interval=100)
+        # ani.save(path, writer='pillow')
+
+        plt.clf()
+
+    create_gif(tables_lorentz, suffix + "test_lorentz.gif")
+    create_gif(tables_euclidean, suffix + "test_euclidean.gif")
+    create_gif_3d(tables_spherical, suffix + "test_spherical.gif")
 
 
 def approx_W_k(Sigma, k, sample_size):
@@ -868,7 +996,7 @@ def plot_figure(adj_mat, table, path):
     plt.close()
 
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
 #     # All of the functions assumes the curvature of hyperbolic space is 1.
 #     # arcosh
 #     print("--------arcosh--------")
@@ -963,24 +1091,25 @@ def plot_figure(adj_mat, table, path):
 #     )
 #     print(set_dim0(x, R=3))
 
-#     # set_dim0
-#     print("--------projection_k--------")
-#     x = torch.Tensor([
-#         [1, 2, -1, 0],
-#         [-1, 1, 2, 1],
-#         [1, -3, 1, 2]
-#     ]
-#     )
-#     print(projection_k(x, R=3, k=-1))
-#     print(projection_k(x * np.sqrt(2), R=3, k=-1 / 2))
-#     x = torch.Tensor([
-#         [1, 1],
-#         [-1, -1],
-#         [4, -4]
-#     ]
-#     )
-#     print(projection_k(x, k=1))
-#     print(projection_k(x * np.sqrt(2), k=1 / 2))
+    # set_dim0
+    print("--------projection_k--------")
+    x = torch.Tensor([
+        [1, 2, -1, 0],
+        [-1, 1, 2, 1],
+        [1, -3, 1, 2]
+    ]
+    )
+    print(projection_k(x, R=3, k=-1))
+    print(projection_k(x * np.sqrt(2), R=3, k=-1 / 2))
+    x = torch.Tensor([
+        [0.5, 0.5],
+        [1, 1],
+        [-1, -1],
+        [4, -4]
+    ]
+    )
+    print(projection_k(x, k=1))
+    print(projection_k(x * np.sqrt(2), k=1 / 2))
 
 #     # sin_K, cos_K, arcos_k
 #     print("--------sin_k, cos_k, arcos_k--------")
