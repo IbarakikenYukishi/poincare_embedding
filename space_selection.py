@@ -45,16 +45,17 @@ from utils.utils import (
     arcos_k,
     inner_product_k,
     dist_k,
-    # s_dist_k,
-    # h_dist_k,
     tangent_norm_k,
     exp_map_k,
     projection_k,
     log_map_k,
+    sqrt_I_n
+)
+from utils.utils_spherical import (
     approx_W_k,
     mle_truncated_normal,
-    calc_spherical_complexity,
-    sqrt_I_n
+    mle_truncated_normal_gpu,
+    calc_spherical_complexity
 )
 from utils.utils_dataset import (
     get_unobserved,
@@ -113,9 +114,8 @@ class RSGD(optim.Optimizer):
 
     def step(self):
         for group in self.param_groups:
-
-            # betaとsigmaの更新
-            # 全てのモデルで共通
+            # update of beta and gamma
+            # same for all models
             beta = group["params"][0]
             gamma = group["params"][1]
 
@@ -133,47 +133,12 @@ class RSGD(optim.Optimizer):
             if not math.isnan(gamma_update):
                 gamma.data.copy_(torch.tensor(gamma_update))
 
-            # うめこみの更新
+            # update of the embedding
             for p in group["params"][2:]:
-                # print("p.grad:", p.grad)
                 if p.grad is None:
                     continue
 
-                if group["k"] < 0:  # hyperbolic case
-                    B, D = p.size()
-                    gl = torch.eye(D, device=p.device, dtype=p.dtype)
-                    gl[0, 0] = -1
-                    grad_norm = torch.norm(p.grad.data)
-                    grad_norm = torch.where(
-                        grad_norm > 1, grad_norm, torch.tensor(1.0, device=p.device))
-                    # only normalize if global grad_norm is more than 1
-                    h = (p.grad.data / grad_norm) @ gl
-                    proj = (
-                        h
-                        - group["k"] * (
-                            inner_product_k(p, h, group["k"])
-                        ).unsqueeze(1)
-                        * p
-                    )
-                    update = exp_map_k(
-                        p, -group["lr_embeddings"] * proj, group["k"])
-                    # print(update)
-                    is_nan_inf = torch.isnan(update) | torch.isinf(update)
-                    update = torch.where(is_nan_inf, p, update)
-                    # update = set_dim0(update, group["R"] * 1.00)
-                    update = projection_k(update, group["k"], group["R"])
-
-                    p.data.copy_(update)
-
-                    if group["perturbation"]:
-                        r = arcosh(
-                            np.sqrt(abs(group["k"])) * p[:, 0]).double() / np.sqrt(abs(group["k"]))
-                        r = torch.where(r <= 1e-5)
-                        perturbation = torch.normal(
-                            0.0, 0.0001, size=(len(r), D)).to(p.device)
-                        p.data.copy_(
-                            projection_k(p + perturbation, group["k"], group["R"]))
-                elif group["k"] == 0:  # Euclidean case
+                if group["k"] == 0:
                     B, D = p.size()
                     grad_norm = torch.norm(p.grad.data)
                     grad_norm = torch.where(
@@ -194,14 +159,15 @@ class RSGD(optim.Optimizer):
                             dist_k(p, torch.zeros(D).to(group["device"]), k=0))
                         perturbation = torch.normal(
                             0.0, 0.0001, size=(len(r), D)).to(p.device)
-                else:
+                else:  # hyperbolic and spherical case
                     B, D = p.size()
                     gl = torch.eye(D, device=p.device, dtype=p.dtype)
-                    # gl[0, 0] = -1
+                    if group["k"] < 0:
+                        gl[0, 0] = -1
                     grad_norm = torch.norm(p.grad.data)
                     grad_norm = torch.where(
                         grad_norm > 1, grad_norm, torch.tensor(1.0, device=p.device))
-                    # only normalize if global grad_norm is more than 1
+                    # normalize if and only if grad_norm is more than 1
                     h = (p.grad.data / grad_norm) @ gl
                     proj = (
                         h
@@ -212,12 +178,8 @@ class RSGD(optim.Optimizer):
                     )
                     update = exp_map_k(
                         p, -group["lr_embeddings"] * proj, group["k"])
-                    # print("embedding:", p)
-                    # print("update:", update)
-                    # print("grad:", p.grad)
                     is_nan_inf = torch.isnan(update) | torch.isinf(update)
                     update = torch.where(is_nan_inf, p, update)
-                    # update = set_dim0(update, group["R"] * 1.00)
                     update = projection_k(update, group["k"], group["R"])
 
                     p.data.copy_(update)
@@ -275,7 +237,7 @@ class BaseEmbedding(nn.Module):
         pairs,
         labels
     ):
-        # zを与えた下でのyの尤度
+        # likelihood of y given z
         loss = self.lik_y_given_z(
             pairs,
             labels
@@ -460,11 +422,11 @@ class Euclidean(BaseEmbedding):
             Z = np.sqrt(np.sum((X - Y) ** 2, axis=2))
             return Z
 
-        print(x_e)
+        # print(x_e)
 
         dist_mat = distance_mat(x_e, x_e)
 
-        print(dist_mat)
+        # print(dist_mat)
 
         is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
         dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
@@ -662,7 +624,7 @@ class Spherical(BaseEmbedding):
         self.table = nn.Embedding(n_nodes, n_dim + 1, sparse=sparse)
 
         nn.init.uniform(self.table.weight, -init_range, init_range)
-        self.table.weight.data[:, 0] += 1/np.sqrt(abs(self.k))
+        self.table.weight.data[:, 0] += 1 / np.sqrt(abs(self.k))
 
         # 0次元目をセット
         with torch.no_grad():
@@ -680,11 +642,9 @@ class Spherical(BaseEmbedding):
         v_ = log_map_k(z, mu, self.k)
         v = v_[:, 1:]
 
-        # print(v)
-
         # MLE estimation of multivariate truncated normal
-        sigma_mle, _ = mle_truncated_normal(
-            points=v.cpu().numpy(),
+        self.sigma, _ = mle_truncated_normal_gpu(
+            points=v,
             sigma_min=sigma_min,
             sigma_max=sigma_max,
             k=self.k,
@@ -692,10 +652,12 @@ class Spherical(BaseEmbedding):
             n_iter=10000,
             learning_rate=0.001,
             alpha=0.9,
+            device=self.device,
+            sigma_init=self.sigma,
             early_stopping=100,
             verbose=False
         )
-        self.sigma = torch.tensor(sigma_mle).float().to(self.device)
+        # self.sigma = torch.tensor(sigma_mle).float().to(self.device)
 
         print(self.sigma)
         print("beta:", self.beta)
@@ -718,22 +680,15 @@ class Spherical(BaseEmbedding):
         v = v_[:, 1:]
         sigma_inv = (1 / self.sigma).reshape((-1, 1))
         lik += 0.5 * (v * v).mm(sigma_inv)[:, 0]
-        # lik += approx_W_k(Sigma, k, sample_size=1000)
         # the normalization term is unnecessary to learn the embedding
+        # lik += approx_W_k(Sigma, k, sample_size=1000)
 
         # -log Jacobian
         v_norm_k = np.sqrt(abs(self.k)) * tangent_norm_k(v_, self.k)
         v_norm_k = torch.where(
             v_norm_k <= 1e-6, torch.tensor(1e-6).to(self.device), v_norm_k)
-        # v_norm_k = torch.where(
-        #     v_norm >= np.pi-1e-6, torch.tensor(1e-6).to(self.device), v_norm_k)
-        # print(v_norm)
         lik += (self.n_dim - 1) * \
             (torch.log(torch.abs(sin_k(v_norm_k, self.k)) + 1e-6) - torch.log(v_norm_k))
-
-        # (torch.log(1 - torch.exp(-2 * v_norm_k)) +
-        # v_norm_k - torch.tensor([np.log(2)]).to(self.device) -
-        # torch.log(v_norm_k))
 
         return lik
 
@@ -749,12 +704,6 @@ class Spherical(BaseEmbedding):
                               k=self.k, sample_size=1000))
 
         return lik_z
-
-    # def get_poincare_table(self):
-    #     table = self.table.weight.data.cpu().numpy()
-    #     return table[:, 1:] / (
-    #         table[:, :1] + 1
-    #     )  # diffeomorphism transform to poincare ball
 
     def get_PC(
         self,
@@ -777,10 +726,6 @@ class Spherical(BaseEmbedding):
         n_nodes_sample = len(x_e)
         print(n_nodes_sample)
 
-        # lorentz scalar product
-        # first_term = - x_e[:, :1] * x_e[:, :1].T
-        # remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
-        # adj_mat = - (first_term + remaining)
         adj_mat = self.k * x_e.dot(x_e.T)
 
         for i in range(n_nodes_sample):
@@ -973,7 +918,7 @@ def LinkPrediction(
                 sigma_max
             )
 
-        if calc_spherical:  # Euclidean
+        if calc_spherical:  # Spherical
             print("Spherical MLE")
             model_spherical_latent.params_mle(
                 sigma_min,
@@ -1080,30 +1025,6 @@ def LinkPrediction(
     basescore_y_and_z_euclidean = basescore_y_given_z_euclidean + basescore_z_euclidean
     basescore_y_and_z_spherical = basescore_y_given_z_spherical + basescore_z_spherical
 
-    # Non-identifiable model
-    # AIC_naive = basescore_y_given_z_naive + \
-    #     (params_dataset['n_nodes'] * model_n_dim + 2)
-    # BIC_naive = basescore_y_given_z_naive + ((params_dataset['n_nodes'] * model_n_dim + 2) / 2) * (
-    # np.log(params_dataset['n_nodes']) + np.log(params_dataset['n_nodes'] -
-    # 1) - np.log(2))
-
-    # # DNML-HGG
-    # pc_hgg_first, pc_hgg_second = model_hgg.get_PC(
-    #     sigma_max,
-    #     sigma_min,
-    #     beta_min,
-    #     beta_max,
-    #     gamma_min,
-    #     gamma_max,
-    #     sampling=True
-    # )
-    # DNML_HGG = basescore_y_and_z_hgg + pc_hgg_first + pc_hgg_second
-
-    # AIC_HGG = basescore_y_and_z_hgg + 3
-    # BIC_HGG = basescore_y_and_z_hgg + 0.5 * (np.log(params_dataset['n_nodes']) + np.log(
-    # params_dataset['n_nodes'] - 1) - np.log(2)) +
-    # np.log(params_dataset['n_nodes'])
-
     # Lorentz
     pc_lorentz_first, pc_lorentz_second = model_lorentz_latent.get_PC(
         beta_min,
@@ -1115,6 +1036,9 @@ def LinkPrediction(
         sampling=True
     )
     DNML_lorentz = basescore_y_and_z_lorentz + pc_lorentz_first + pc_lorentz_second
+    AIC_lorentz = basescore_y_and_z_lorentz + model_n_dim + 2
+    BIC_lorentz = basescore_y_and_z_lorentz + np.log(params_dataset["n_nodes"]) + np.log(
+        params_dataset["n_nodes"] - 1) - np.log(2) + 0.5 * model_n_dim * np.log(params_dataset["n_nodes"])
 
     # Euclidean
     pc_euclidean_first, pc_euclidean_second = model_euclidean_latent.get_PC(
@@ -1128,6 +1052,9 @@ def LinkPrediction(
     )
     DNML_euclidean = basescore_y_and_z_euclidean + \
         pc_euclidean_first + pc_euclidean_second
+    AIC_euclidean = basescore_y_and_z_euclidean + model_n_dim + 2
+    BIC_euclidean = basescore_y_and_z_euclidean + np.log(params_dataset["n_nodes"]) + np.log(
+        params_dataset["n_nodes"] - 1) - np.log(2) + 0.5 * model_n_dim * np.log(params_dataset["n_nodes"])
 
     # Spherical
     pc_spherical_first, pc_spherical_second = model_spherical_latent.get_PC(
@@ -1141,12 +1068,9 @@ def LinkPrediction(
     )
     DNML_spherical = basescore_y_and_z_spherical + \
         pc_spherical_first + pc_spherical_second
-
-    # AIC_lorentz = basescore_y_and_z_lorentz + \
-    #     model_n_dim * (model_n_dim + 1) / 2 + 2
-    # BIC_lorentz = basescore_y_and_z_lorentz + (np.log(params_dataset['n_nodes']) + np.log(
-    # params_dataset['n_nodes'] - 1) - np.log(2)) + (model_n_dim *
-    # (model_n_dim + 1) / 4) * np.log(params_dataset['n_nodes'])
+    AIC_spherical = basescore_y_and_z_spherical + model_n_dim + 2
+    BIC_spherical = basescore_y_and_z_spherical + np.log(params_dataset["n_nodes"]) + np.log(
+        params_dataset["n_nodes"] - 1) - np.log(2) + 0.5 * model_n_dim * np.log(params_dataset["n_nodes"])
 
     if calc_othermetrics:
 
@@ -1190,21 +1114,24 @@ def LinkPrediction(
     print("pc_lorentz_first", pc_lorentz_first)
     print("pc_lorentz_second", pc_lorentz_second)
     print("DNML-lorentz:", DNML_lorentz)
+    print("AIC_lorentz:", AIC_lorentz)
+    print("BIC_lorentz:", BIC_lorentz)
     print("-log p_euclidean(y, z):", basescore_y_and_z_euclidean)
     print("-log p_euclidean(y|z):", basescore_y_given_z_euclidean)
     print("-log p_euclidean(z):", basescore_z_euclidean)
     print("pc_euclidean_first", pc_euclidean_first)
     print("pc_euclidean_second", pc_euclidean_second)
     print("DNML-euclidean:", DNML_euclidean)
+    print("AIC_euclidean:", AIC_euclidean)
+    print("BIC_euclidean:", BIC_euclidean)
     print("-log p_spherical(y, z):", basescore_y_and_z_spherical)
     print("-log p_spherical(y|z):", basescore_y_given_z_spherical)
     print("-log p_spherical(z):", basescore_z_spherical)
     print("pc_spherical_first", pc_spherical_first)
     print("pc_spherical_second", pc_spherical_second)
     print("DNML-spherical:", DNML_spherical)
-
-    # print("AIC_naive:", AIC_naive)
-    # print("BIC_naive:", BIC_naive)
+    print("AIC_spherical:", AIC_spherical)
+    print("BIC_spherical:", BIC_spherical)
     print("AUC_lorentz:", AUC_lorentz)
     print("AUC_euclidean:", AUC_euclidean)
     print("AUC_spherical:", AUC_spherical)
@@ -1213,14 +1140,15 @@ def LinkPrediction(
         "DNML_lorentz": DNML_lorentz,
         "DNML_euclidean": DNML_euclidean,
         "DNML_spherical": DNML_spherical,
-        # "AIC_naive": AIC_naive,
-        # "BIC_naive": BIC_naive,
+        "AIC_lorentz": AIC_lorentz,
+        "AIC_euclidean": AIC_euclidean,
+        "AIC_spherical": AIC_spherical,
+        "BIC_lorentz": BIC_lorentz,
+        "BIC_euclidean": BIC_euclidean,
+        "BIC_spherical": BIC_spherical,
         "AUC_lorentz": AUC_lorentz,
         "AUC_euclidean": AUC_euclidean,
         "AUC_spherical": AUC_spherical,
-        # "AUC_WND": AUC_WND,
-        # "AUC_naive": AUC_naive,
-        # "AUC_GT": AUC_GT,
         "-log p_lorentz(y, z)": basescore_y_and_z_lorentz,
         "-log p_lorentz(y|z)": basescore_y_given_z_lorentz,
         "-log p_lorentz(z)": basescore_z_lorentz,
@@ -1230,7 +1158,6 @@ def LinkPrediction(
         "-log p_spherical(y, z)": basescore_y_and_z_spherical,
         "-log p_spherical(y|z)": basescore_y_given_z_spherical,
         "-log p_spherical(z)": basescore_z_spherical,
-        # "-log p_naive(y; z)": basescore_y_given_z_naive,
         "pc_lorentz_first": pc_lorentz_first,
         "pc_lorentz_second": pc_lorentz_second,
         "pc_euclidean_first": pc_euclidean_first,
@@ -1297,9 +1224,6 @@ if __name__ == '__main__':
 
     result = pd.DataFrame()
 
-    # model_n_dims = [4, 8, 16, 32, 64]
-    # model_n_dims = [16, 32, 64]
-    # model_n_dims = [64]
     model_n_dims = [4]
 
     positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
@@ -1342,9 +1266,7 @@ if __name__ == '__main__':
             beta_max=beta_max,
             gamma_min=gamma_min,
             gamma_max=gamma_max,
-            change_learning_rate= change_learning_rate,
-            # eps_1=eps_1,
-            # eps_2=eps_2,
+            change_learning_rate=change_learning_rate,
             init_range=init_range,
             device=device,
             calc_lorentz=True,
@@ -1387,8 +1309,6 @@ if __name__ == '__main__':
         ret["beta_min"] = beta_min
         ret["gamma_max"] = gamma_max
         ret["gamma_min"] = gamma_min
-        # ret["eps_1"] = eps_1
-        # ret["eps_2"] = eps_2
         ret["init_range"] = init_range
 
         row = pd.DataFrame(ret.values(), index=ret.keys()).T
@@ -1403,8 +1323,12 @@ if __name__ == '__main__':
             "DNML_lorentz",
             "DNML_euclidean",
             "DNML_spherical",
-            # "AIC_naive",
-            # "BIC_naive",
+            "AIC_lorentz",
+            "AIC_euclidean",
+            "AIC_spherical",
+            "BIC_lorentz",
+            "BIC_euclidean",
+            "BIC_spherical",
             "AUC_lorentz",
             "AUC_euclidean",
             "AUC_spherical",
@@ -1417,7 +1341,6 @@ if __name__ == '__main__':
             "-log p_spherical(y, z)",
             "-log p_spherical(y|z)",
             "-log p_spherical(z)",
-            # "-log p_naive(y; z)",
             "pc_lorentz_first",
             "pc_lorentz_second",
             "pc_euclidean_first",
@@ -1437,8 +1360,6 @@ if __name__ == '__main__':
             "beta_min",
             "gamma_max",
             "gamma_min",
-            # "eps_1",
-            # "eps_2",
             "init_range"
         ]
         )
