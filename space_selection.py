@@ -63,14 +63,8 @@ from utils.utils_dataset import (
     NegGraph,
     create_test_for_link_prediction,
     create_dataset_for_basescore,
-    create_dataset
-)
-from datasets import (
-    hyperbolic_geometric_graph,
-    connection_prob,
-    wrapped_normal_distribution,
-    euclidean_geometric_graph,
-    init_HGG
+    create_dataset,
+    hyperbolic_geometric_graph
 )
 
 np.random.seed(0)
@@ -86,12 +80,11 @@ class RSGD(optim.Optimizer):
         self,
         params,
         lr_embeddings,
-        lr_beta,
+        lr_kappa,
         lr_gamma,
         R,
         k,
-        beta_max,
-        beta_min,
+        k_max,
         gamma_max,
         gamma_min,
         perturbation,
@@ -99,12 +92,11 @@ class RSGD(optim.Optimizer):
     ):
         defaults = {
             "lr_embeddings": lr_embeddings,
-            "lr_beta": lr_beta,
+            "lr_kappa": lr_kappa,
             "lr_gamma": lr_gamma,
             "R": R,
             "k": k,
-            "beta_max": beta_max,
-            "beta_min": beta_min,
+            "k_max": k_max,
             "gamma_max": gamma_max,
             "gamma_min": gamma_min,
             "perturbation": perturbation,
@@ -116,15 +108,25 @@ class RSGD(optim.Optimizer):
         for group in self.param_groups:
             # update of beta and gamma
             # same for all models
-            beta = group["params"][0]
+            kappa = group["params"][0]
             gamma = group["params"][1]
 
-            beta_update = beta.data - \
-                group["lr_beta"] * beta.grad.data
-            beta_update = max(beta_update, group["beta_min"])
-            beta_update = min(beta_update, group["beta_max"])
-            if not math.isnan(beta_update):
-                beta.data.copy_(torch.tensor(beta_update))
+            # beta_update = beta.data - \
+            #     group["lr_beta"] * beta.grad.data
+            # beta_update = max(beta_update, group["beta_min"])
+            # beta_update = min(beta_update, group["beta_max"])
+            # if not math.isnan(beta_update):
+            #     beta.data.copy_(torch.tensor(beta_update))
+
+            if kappa != 0:
+                kappa_update = kappa.data - \
+                    group["lr_kappa"] * kappa.grad.data
+                if kappa > 0:
+                    kappa_update = max(kappa_update, 1 / group["k_max"])
+                elif kappa < 0:
+                    kappa_update = min(kappa_update, - 1 / group["k_max"])
+                if not math.isnan(kappa_update):
+                    kappa.data.copy_(torch.tensor(kappa_update))
 
             gamma_update = gamma.data - \
                 group["lr_gamma"] * gamma.grad.data
@@ -182,6 +184,10 @@ class RSGD(optim.Optimizer):
                     update = torch.where(is_nan_inf, p, update)
                     update = projection_k(update, group["k"], group["R"])
 
+                    # if group["k"] > 0:
+                    #     print("embedding:", p)
+                    #     print("update:", update)
+                    #     print("grad:", p.grad)
                     p.data.copy_(update)
 
                     if group["perturbation"]:
@@ -264,18 +270,32 @@ class BaseEmbedding(nn.Module):
         us = self.table(pairs[:, 0])
         vs = self.table(pairs[:, 1])
 
-        # ロス計算
-        dist = dist_k(us, vs, self.k)
-        loss = torch.clone(labels).float()
-        # 数値計算の問題をlogaddexpで回避
-        # zを固定した下でのyのロス
-        loss = torch.where(
-            loss == 1,
-            torch.logaddexp(torch.tensor([0.0]).to(
-                self.device), self.beta * dist - self.gamma),
-            torch.logaddexp(torch.tensor([0.0]).to(
-                self.device), -self.beta * dist + self.gamma)
-        )
+        if self.k == 0:
+            # ロス計算
+            dist = dist_k(us, vs, self.k)
+            loss = torch.clone(labels).float()
+            # 数値計算の問題をlogaddexpで回避
+            # zを固定した下でのyのロス
+            loss = torch.where(
+                loss == 1,
+                torch.logaddexp(torch.tensor([0.0]).to(
+                    self.device), dist - self.gamma),
+                torch.logaddexp(torch.tensor([0.0]).to(
+                    self.device), -dist + self.gamma)
+            )
+        else:
+            # ロス計算
+            dist = dist_k(us, vs, self.k)
+            loss = torch.clone(labels).float()
+            # 数値計算の問題をlogaddexpで回避
+            # zを固定した下でのyのロス
+            loss = torch.where(
+                loss == 1,
+                torch.logaddexp(torch.tensor([0.0]).to(
+                    self.device), torch.sqrt(torch.abs(self.kappa)) * dist - self.gamma),
+                torch.logaddexp(torch.tensor([0.0]).to(
+                    self.device), -torch.sqrt(torch.abs(self.kappa)) * dist + self.gamma)
+            )
 
         return loss
 
@@ -287,22 +307,22 @@ class BaseEmbedding(nn.Module):
 
         return lik_z
 
-    def calc_probability(
-        self,
-        samples,
-    ):
-        samples_ = torch.Tensor(samples).to(self.device).long()
+    # def calc_probability(
+    #     self,
+    #     samples,
+    # ):
+    #     samples_ = torch.Tensor(samples).to(self.device).long()
 
-        # 座標を取得
-        us = self.table(samples_[:, 0])
-        vs = self.table(samples_[:, 1])
+    #     # 座標を取得
+    #     us = self.table(samples_[:, 0])
+    #     vs = self.table(samples_[:, 1])
 
-        dist = dist_k(us, vs, k)
-        p = torch.exp(-torch.logaddexp(torch.tensor([0.0]).to(
-            self.device), self.beta * (dist - self.R)))
-        print(p)
+    #     dist = dist_k(us, vs, k)
+    #     p = torch.exp(-torch.logaddexp(torch.tensor([0.0]).to(
+    #         self.device), self.beta * (dist - self.R)))
+    #     print(p)
 
-        return p.detach().cpu().numpy()
+    #     return p.detach().cpu().numpy()
 
     def calc_dist(
         self,
@@ -314,7 +334,11 @@ class BaseEmbedding(nn.Module):
         us = self.table(samples_[:, 0])
         vs = self.table(samples_[:, 1])
 
-        dist = dist_k(us, vs, self.k)
+        if self.k == 0:
+            dist = dist_k(us, vs, self.k)
+        else:
+            dist = 1 / torch.sqrt(torch.abs(self.kappa)) * \
+                dist_k(us, vs, self.k)
 
         return dist.detach().cpu().numpy()
 
@@ -335,7 +359,7 @@ class Euclidean(BaseEmbedding):
         n_nodes,
         n_dim,
         sigma,
-        beta,
+        # kappa,
         gamma,
         init_range=0.01,
         sparse=True,
@@ -352,7 +376,8 @@ class Euclidean(BaseEmbedding):
             device=device,
             calc_latent=calc_latent
         )
-        self.beta = nn.Parameter(torch.tensor(beta))
+        # 使わないがプログラムの統一感のためにダミーで入れておく
+        self.kappa = nn.Parameter(torch.tensor(0.0))
         self.gamma = nn.Parameter(torch.tensor(gamma))
         self.sigma = sigma.to(self.device)
 
@@ -376,7 +401,7 @@ class Euclidean(BaseEmbedding):
             sigma_max).to(self.device), self.sigma)
 
         print(self.sigma)
-        print("beta:", self.beta)
+        print("kappa:", self.kappa, "k:", 1 / self.kappa)
         print("gamma:", self.gamma)
 
     def latent_lik(
@@ -397,49 +422,50 @@ class Euclidean(BaseEmbedding):
 
     def get_PC(
         self,
-        beta_min,
-        beta_max,
+        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
         sigma_max,
         sampling
     ):
-        if sampling == False:
-            x_e = self.get_table()
-        else:
-            idx = np.array(range(self.n_nodes))
-            idx = np.random.permutation(
-                idx)[:min(int(self.n_nodes * 0.1), 100)]
-            x_e = self.get_table()[idx, :]
+        # if sampling == False:
+        #     x_e = self.get_table()
+        # else:
+        #     idx = np.array(range(self.n_nodes))
+        #     idx = np.random.permutation(
+        #         idx)[:min(int(self.n_nodes * 0.1), 100)]
+        #     x_e = self.get_table()[idx, :]
 
-        n_nodes_sample = len(x_e)
-        print(n_nodes_sample)
+        # n_nodes_sample = len(x_e)
+        # print(n_nodes_sample)
 
-        def distance_mat(X, Y):
-            X = X[:, np.newaxis, :]
-            Y = Y[np.newaxis, :, :]
-            Z = np.sqrt(np.sum((X - Y) ** 2, axis=2))
-            return Z
+        # def distance_mat(X, Y):
+        #     X = X[:, np.newaxis, :]
+        #     Y = Y[np.newaxis, :, :]
+        #     Z = np.sqrt(np.sum((X - Y) ** 2, axis=2))
+        #     return Z
 
-        # print(x_e)
+        # # print(x_e)
 
-        dist_mat = distance_mat(x_e, x_e)
+        # dist_mat = distance_mat(x_e, x_e)
 
-        # print(dist_mat)
+        # # print(dist_mat)
 
-        is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
-        dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
-        X = dist_mat
-        for i in range(n_nodes_sample):
-            X[i, i] = 0
+        # is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
+        # dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
+        # X = dist_mat
+        # for i in range(n_nodes_sample):
+        #     X[i, i] = 0
 
-        sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
+        # sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
 
-        integral, _ = integrate.dblquad(sqrt_I_n_, gamma_min,
-                                        gamma_max, beta_min, beta_max)
-        ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
-            np.log(integral)
+        # integral, _ = integrate.dblquad(sqrt_I_n_, gamma_min,
+        #                                 gamma_max, beta_min, beta_max)
+        # ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
+        #     np.log(integral)
+
+        ret_1 = 0
 
         ret_2 = - self.n_dim * gammaln(self.n_nodes / 2) + (self.n_nodes * self.n_dim / 2) * np.log(
             self.n_nodes / (2 * np.e)) + self.n_dim * (np.log(np.log(sigma_max) - np.log(sigma_min)))
@@ -454,9 +480,9 @@ class Lorentz(BaseEmbedding):
         n_nodes,
         n_dim,  # 次元より1つ多くデータを取る必要があることに注意
         R,
-        k,
+        # k,
         sigma,
-        beta,
+        kappa,
         gamma,
         init_range=0.01,
         sparse=True,
@@ -467,13 +493,13 @@ class Lorentz(BaseEmbedding):
             n_nodes=n_nodes,
             n_dim=n_dim,  # 次元より1つ多くデータを取る必要があることに注意
             R=R,
-            k=k,
+            k=-1,
             init_range=init_range,
             sparse=sparse,
             device=device,
             calc_latent=calc_latent
         )
-        self.beta = nn.Parameter(torch.tensor(beta))
+        self.kappa = nn.Parameter(torch.tensor(kappa))
         self.gamma = nn.Parameter(torch.tensor(gamma))
         self.sigma = sigma.to(self.device)
 
@@ -503,7 +529,7 @@ class Lorentz(BaseEmbedding):
         self.sigma = torch.where(self.sigma > sigma_max, torch.tensor(
             sigma_max).to(self.device), self.sigma)
         print(self.sigma)
-        print("beta:", self.beta)
+        print("kappa:", self.kappa)
         print("gamma:", self.gamma)
 
     def latent_lik(
@@ -515,6 +541,7 @@ class Lorentz(BaseEmbedding):
         # 定数項
         lik = torch.ones(n_subnodes).to(self.device) * ((self.n_dim / 2) * torch.log(
             torch.tensor(2 * np.pi).to(self.device)) + 0.5 * torch.sum(torch.log(self.sigma)))
+        lik += self.n_dim / 2 * torch.log(torch.abs(self.kappa))
 
         # データから決まる項
         mu = torch.zeros((x.shape[0], self.n_dim + 1)).to(self.device)
@@ -542,48 +569,50 @@ class Lorentz(BaseEmbedding):
 
     def get_PC(
         self,
-        beta_min,
-        beta_max,
+        # beta_min,
+        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
         sigma_max,
         sampling
     ):
-        if sampling == False:
-            x_e = self.get_table()
-        else:
-            idx = np.array(range(self.n_nodes))
-            idx = np.random.permutation(
-                idx)[:min(int(self.n_nodes * 0.1), 100)]
-            x_e = self.get_table()[idx, :]
+        # if sampling == False:
+        #     x_e = self.get_table()
+        # else:
+        #     idx = np.array(range(self.n_nodes))
+        #     idx = np.random.permutation(
+        #         idx)[:min(int(self.n_nodes * 0.1), 100)]
+        #     x_e = self.get_table()[idx, :]
 
-        n_nodes_sample = len(x_e)
-        print(n_nodes_sample)
+        # n_nodes_sample = len(x_e)
+        # print(n_nodes_sample)
 
-        # lorentz scalar product
-        first_term = - x_e[:, :1] * x_e[:, :1].T
-        remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
-        adj_mat = - (first_term + remaining)
+        # # lorentz scalar product
+        # first_term = - x_e[:, :1] * x_e[:, :1].T
+        # remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
+        # adj_mat = - (first_term + remaining)
 
-        for i in range(n_nodes_sample):
-            adj_mat[i, i] = 1
-        # distance matrix
-        dist_mat = np.arccosh(adj_mat)
+        # for i in range(n_nodes_sample):
+        #     adj_mat[i, i] = 1
+        # # distance matrix
+        # dist_mat = np.arccosh(adj_mat)
 
-        is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
-        dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
-        X = dist_mat
-        # dist_mat
-        for i in range(n_nodes_sample):
-            X[i, i] = 0
+        # is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
+        # dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
+        # X = dist_mat
+        # # dist_mat
+        # for i in range(n_nodes_sample):
+        #     X[i, i] = 0
 
-        sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
+        # sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
 
-        integral, _ = integrate.dblquad(sqrt_I_n_, gamma_min,
-                                        gamma_max, beta_min, beta_max)
-        ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
-            np.log(integral)
+        # integral, _ = integrate.dblquad(sqrt_I_n_, gamma_min,
+        #                                 gamma_max, beta_min, beta_max)
+        # ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
+        #     np.log(integral)
+
+        ret_1 = 0
 
         ret_2 = - self.n_dim * gammaln(self.n_nodes / 2) + (self.n_nodes * self.n_dim / 2) * np.log(
             self.n_nodes / (2 * np.e)) + self.n_dim * (np.log(np.log(sigma_max) - np.log(sigma_min)))
@@ -598,9 +627,9 @@ class Spherical(BaseEmbedding):
         n_nodes,
         n_dim,  # 次元より1つ多くデータを取る必要があることに注意
         # R,
-        k,
+        # k,
         sigma,
-        beta,
+        kappa,
         gamma,
         init_range=0.01,
         sparse=True,
@@ -611,13 +640,14 @@ class Spherical(BaseEmbedding):
             n_nodes=n_nodes,
             n_dim=n_dim,  # 次元より1つ多くデータを取る必要があることに注意
             R=0,
-            k=k,
+            k=1,
             init_range=init_range,
             sparse=sparse,
             device=device,
             calc_latent=calc_latent
         )
-        self.beta = nn.Parameter(torch.tensor(beta))
+        # self.beta = nn.Parameter(torch.tensor(beta))
+        self.kappa = nn.Parameter(torch.tensor(kappa))
         self.gamma = nn.Parameter(torch.tensor(gamma))
         self.sigma = sigma.to(self.device)
 
@@ -646,21 +676,23 @@ class Spherical(BaseEmbedding):
         self.sigma, _ = mle_truncated_normal_gpu(
             points=v,
             sigma_min=sigma_min,
+            # sigma_min=0.001,
             sigma_max=sigma_max,
             k=self.k,
             sample_size=1000,
-            n_iter=10000,
+            n_iter=3000,
             learning_rate=0.001,
             alpha=0.9,
             device=self.device,
             sigma_init=self.sigma,
-            early_stopping=100,
+            early_stopping=50,
+            # verbose=True
             verbose=False
         )
         # self.sigma = torch.tensor(sigma_mle).float().to(self.device)
 
         print(self.sigma)
-        print("beta:", self.beta)
+        print("kappa:", self.kappa)
         print("gamma:", self.gamma)
 
     def latent_lik(
@@ -672,6 +704,7 @@ class Spherical(BaseEmbedding):
         # 定数項
         lik = torch.ones(n_subnodes).to(self.device) * ((self.n_dim / 2) * torch.log(
             torch.tensor(2 * np.pi).to(self.device)) + 0.5 * torch.sum(torch.log(self.sigma)))
+        lik += self.n_dim / 2 * torch.log(torch.abs(self.kappa))
 
         # データから決まる項
         mu = torch.zeros((x.shape[0], self.n_dim + 1)).to(self.device)
@@ -707,46 +740,48 @@ class Spherical(BaseEmbedding):
 
     def get_PC(
         self,
-        beta_min,
-        beta_max,
+        # beta_min,
+        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
         sigma_max,
         sampling
     ):
-        if sampling == False:
-            x_e = self.get_table()
-        else:
-            idx = np.array(range(self.n_nodes))
-            idx = np.random.permutation(
-                idx)[:min(int(self.n_nodes * 0.1), 100)]
-            x_e = self.get_table()[idx, :]
+        # if sampling == False:
+        #     x_e = self.get_table()
+        # else:
+        #     idx = np.array(range(self.n_nodes))
+        #     idx = np.random.permutation(
+        #         idx)[:min(int(self.n_nodes * 0.1), 100)]
+        #     x_e = self.get_table()[idx, :]
 
-        n_nodes_sample = len(x_e)
-        print(n_nodes_sample)
+        # n_nodes_sample = len(x_e)
+        # print(n_nodes_sample)
 
-        adj_mat = self.k * x_e.dot(x_e.T)
+        # adj_mat = self.k * x_e.dot(x_e.T)
 
-        for i in range(n_nodes_sample):
-            adj_mat[i, i] = 1
-        # distance matrix
-        dist_mat = arcos_k(adj_mat, k=self.k,
-                           use_torch=False) / np.sqrt(abs(self.k))
+        # for i in range(n_nodes_sample):
+        #     adj_mat[i, i] = 1
+        # # distance matrix
+        # dist_mat = arcos_k(adj_mat, k=self.k,
+        #                    use_torch=False) / np.sqrt(abs(self.k))
 
-        is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
-        dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
-        X = dist_mat
-        # dist_mat
-        for i in range(n_nodes_sample):
-            X[i, i] = 0
+        # is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
+        # dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
+        # X = dist_mat
+        # # dist_mat
+        # for i in range(n_nodes_sample):
+        #     X[i, i] = 0
 
-        sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
+        # sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
 
-        integral, _ = integrate.dblquad(sqrt_I_n_, gamma_min,
-                                        gamma_max, beta_min, beta_max)
-        ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
-            np.log(integral)
+        # integral, _ = integrate.dblquad(sqrt_I_n_, gamma_min,
+        #                                 gamma_max, beta_min, beta_max)
+        # ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
+        #     np.log(integral)
+
+        ret_1 = 0
 
         ret_2 = - self.n_dim * gammaln(self.n_nodes / 2) + (self.n_nodes * self.n_dim / 2) * np.log(
             self.n_nodes / (2 * np.e)) + self.n_dim * (np.log(np.log(sigma_max) - np.log(sigma_min)))
@@ -767,12 +802,14 @@ def LinkPrediction(
     n_max_negatives,
     lr_embeddings,
     lr_epoch_10,
-    lr_beta,
+    # lr_beta,
+    lr_kappa,
     lr_gamma,
     sigma_min,
     sigma_max,
-    beta_min,
-    beta_max,
+    # beta_min,
+    # beta_max,
+    k_max,
     gamma_min,
     gamma_max,
     init_range,
@@ -806,49 +843,56 @@ def LinkPrediction(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,
         R=params_dataset['R'],
-        k=-1,
+        # k=-1,
         sigma=torch.ones(model_n_dim),
-        beta=1.0,
+        # beta=1.0,
+        kappa=-1.0,
         gamma=params_dataset['R'],
         init_range=init_range,
         sparse=sparse,
         device=device,
         calc_latent=True
+        # calc_latent=False
     )
     model_euclidean_latent = Euclidean(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,
         sigma=torch.ones(model_n_dim),
-        beta=1.0,
+        # beta=1.0,
+        # kappa=1.0,
         gamma=params_dataset['R'],
         init_range=init_range,
         sparse=sparse,
         device=device,
         calc_latent=True
+        # calc_latent=False
     )
     model_spherical_latent = Spherical(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,
-        sigma=torch.ones(model_n_dim),
-        beta=1.0,
-        k=1,
+        sigma=torch.ones(model_n_dim) * sigma_min,
+        # beta=1.0,
+        kappa=1.0,
+        # k=1,
         gamma=params_dataset['R'],
         init_range=init_range,
         sparse=sparse,
         device=device,
         calc_latent=True
+        # calc_latent=False
     )
 
     # optimizer
     rsgd_lorentz_latent = RSGD(
         model_lorentz_latent.parameters(),
         lr_embeddings=lr_embeddings,
-        lr_beta=lr_beta,
+        lr_kappa=lr_kappa,
         lr_gamma=lr_gamma,
         R=params_dataset['R'],
         k=-1,
-        beta_max=beta_max,
-        beta_min=beta_min,
+        # beta_max=beta_max,
+        # beta_min=beta_min,
+        k_max=k_max,
         gamma_min=gamma_min,
         gamma_max=gamma_max,
         perturbation=perturbation,
@@ -857,12 +901,11 @@ def LinkPrediction(
     rsgd_euclidean_latent = RSGD(
         model_euclidean_latent.parameters(),
         lr_embeddings=lr_embeddings,
-        lr_beta=lr_beta,
+        lr_kappa=0, # dummy argument
         lr_gamma=lr_gamma,
         R=0,  # dummy argument
         k=0,  # dummy argument
-        beta_max=beta_max,
-        beta_min=beta_min,
+        k_max=k_max,
         gamma_min=gamma_min,
         gamma_max=gamma_max,
         perturbation=perturbation,
@@ -871,12 +914,11 @@ def LinkPrediction(
     rsgd_spherical_latent = RSGD(
         model_spherical_latent.parameters(),
         lr_embeddings=lr_embeddings,
-        lr_beta=lr_beta,
+        lr_kappa=lr_kappa,
         lr_gamma=lr_gamma,
         R=0,  # dummy argument
         k=1,
-        beta_max=beta_max,
-        beta_min=beta_min,
+        k_max=k_max,
         gamma_min=gamma_min,
         gamma_max=gamma_max,
         perturbation=perturbation,
@@ -889,7 +931,19 @@ def LinkPrediction(
 
     start = time.time()
 
+    early_stopping = 10
+
     # change_learning_rate = 100
+
+    loss_lorentz_latent_best = 999999999999
+    loss_euclidean_latent_best = 999999999999
+    loss_spherical_latent_best = 999999999999
+    es_count_lorentz_latent = 0
+    es_count_euclidean_latent = 0
+    es_count_spherical_latent = 0
+    es_lorentz_latent = not calc_lorentz
+    es_euclidean_latent = not calc_euclidean
+    es_spherical_latent = not calc_spherical
 
     for epoch in range(burn_epochs):
         if epoch == change_learning_rate:
@@ -903,27 +957,30 @@ def LinkPrediction(
         losses_euclidean_latent = []
         losses_spherical_latent = []
 
-        # MLE
-        if calc_lorentz:  # Lorentz
-            print("Lorentz MLE")
-            model_lorentz_latent.params_mle(
-                sigma_min,
-                sigma_max
-            )
+        if epoch == change_learning_rate - 1 or (epoch>=change_learning_rate and epoch % 20 ==0):
+            if es_lorentz_latent and es_euclidean_latent and es_spherical_latent:
+                break
+            # MLE
+            if not es_lorentz_latent:  # Lorentz
+                print("Lorentz MLE")
+                model_lorentz_latent.params_mle(
+                    sigma_min,
+                    sigma_max
+                )
 
-        if calc_euclidean:  # Euclidean
-            print("Euclidean MLE")
-            model_euclidean_latent.params_mle(
-                sigma_min,
-                sigma_max
-            )
+            if not es_euclidean_latent:  # Euclidean
+                print("Euclidean MLE")
+                model_euclidean_latent.params_mle(
+                    sigma_min,
+                    sigma_max
+                )
 
-        if calc_spherical:  # Spherical
-            print("Spherical MLE")
-            model_spherical_latent.params_mle(
-                sigma_min,
-                sigma_max
-            )
+            if not es_spherical_latent:  # Spherical
+                print("Spherical MLE")
+                model_spherical_latent.params_mle(
+                    sigma_min,
+                    sigma_max
+                )
 
         for pairs, labels in dataloader:
             pairs = pairs.reshape((-1, 2))
@@ -932,7 +989,7 @@ def LinkPrediction(
             pairs = pairs.to(device)
             labels = labels.to(device)
 
-            if calc_lorentz:  # Lorentz
+            if not es_lorentz_latent:  # Lorentz
                 rsgd_lorentz_latent.zero_grad()
                 if epoch < change_learning_rate:
                     loss_lorentz_latent = model_lorentz_latent.lik_y_given_z(
@@ -944,7 +1001,7 @@ def LinkPrediction(
                 rsgd_lorentz_latent.step()
                 losses_lorentz_latent.append(loss_lorentz_latent)
 
-            if calc_euclidean:  # Euclidean
+            if not es_euclidean_latent:  # Euclidean
                 rsgd_euclidean_latent.zero_grad()
                 if epoch < change_learning_rate:
                     loss_euclidean_latent = model_euclidean_latent.lik_y_given_z(
@@ -956,7 +1013,7 @@ def LinkPrediction(
                 rsgd_euclidean_latent.step()
                 losses_euclidean_latent.append(loss_euclidean_latent)
 
-            if calc_spherical:  # Euclidean
+            if not es_spherical_latent:  # Euclidean
                 rsgd_spherical_latent.zero_grad()
                 if epoch < change_learning_rate:
                     loss_spherical_latent = model_spherical_latent.lik_y_given_z(
@@ -969,15 +1026,61 @@ def LinkPrediction(
                 losses_spherical_latent.append(loss_spherical_latent)
 
         print("epoch:", epoch)
-        if calc_lorentz:  # Lorentz
-            print("loss_lorentz:",
-                  torch.Tensor(losses_lorentz_latent).mean().item())
-        if calc_euclidean:  # Euclidean
-            print("loss_euclidean:",
-                  torch.Tensor(losses_euclidean_latent).mean().item())
-        if calc_spherical:  # Spherical
-            print("loss_spherical:",
-                  torch.Tensor(losses_spherical_latent).mean().item())
+        if not es_lorentz_latent:  # Lorentz
+            loss_lorentz = torch.Tensor(losses_lorentz_latent).mean().item()
+            print("loss_lorentz:", loss_lorentz)
+            if epoch > change_learning_rate:
+                if loss_lorentz < loss_lorentz_latent_best:
+                    loss_lorentz_latent_best = loss_lorentz
+                    es_count_lorentz_latent = 0
+                else:
+                    es_count_lorentz_latent += 1
+                print("es_count_lorentz_latent:", es_count_lorentz_latent)
+                print("loss_lorentz_latent_best:", loss_lorentz_latent_best)
+                if es_count_lorentz_latent > early_stopping:
+                    print("early stopping for lorentz")
+                    es_lorentz_latent = True
+
+        if not es_euclidean_latent:  # Euclidean
+            loss_euclidean = torch.Tensor(
+                losses_euclidean_latent).mean().item()
+            print("loss_euclidean:", loss_euclidean)
+            if epoch > change_learning_rate:
+                if loss_euclidean < loss_euclidean_latent_best:
+                    loss_euclidean_latent_best = loss_euclidean
+                    es_count_euclidean_latent = 0
+                else:
+                    es_count_euclidean_latent += 1
+                print("es_count_euclidean_latent:", es_count_euclidean_latent)
+                print("loss_euclidean_latent_best:",
+                      loss_euclidean_latent_best)
+                if es_count_euclidean_latent > early_stopping:
+                    print("early stopping for euclidean")
+                    es_euclidean_latent = True
+
+        if not es_spherical_latent:  # Spherical
+            loss_spherical = torch.Tensor(
+                losses_spherical_latent).mean().item()
+            print("loss_spherical:", loss_spherical)
+            if epoch > change_learning_rate:
+                if loss_spherical < loss_spherical_latent_best:
+                    loss_spherical_latent_best = loss_spherical
+                    es_count_spherical_latent = 0
+                else:
+                    es_count_spherical_latent += 1
+                print("es_count_spherical_latent:", es_count_spherical_latent)
+                print("loss_spherical_latent_best:",
+                      loss_spherical_latent_best)
+                if es_count_spherical_latent > early_stopping:
+                    print("early stopping for spherical")
+                    es_spherical_latent = True
+
+        # if es_euclidean_latent:  # Euclidean
+        #     print("loss_euclidean:",
+        #           torch.Tensor(losses_euclidean_latent).mean().item())
+        # if es_spherical_latent:  # Spherical
+        #     print("loss_spherical:",
+        #           torch.Tensor(losses_spherical_latent).mean().item())
 
     elapsed_time = time.time() - start
     print("elapsed_time:{0}".format(elapsed_time) + "[sec]")
@@ -1027,8 +1130,9 @@ def LinkPrediction(
 
     # Lorentz
     pc_lorentz_first, pc_lorentz_second = model_lorentz_latent.get_PC(
-        beta_min,
-        beta_max,
+        # beta_min,
+        # beta_max,
+        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
@@ -1042,8 +1146,9 @@ def LinkPrediction(
 
     # Euclidean
     pc_euclidean_first, pc_euclidean_second = model_euclidean_latent.get_PC(
-        beta_min,
-        beta_max,
+        # beta_min,
+        # beta_max,
+        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
@@ -1058,8 +1163,9 @@ def LinkPrediction(
 
     # Spherical
     pc_spherical_first, pc_spherical_second = model_spherical_latent.get_PC(
-        beta_min,
-        beta_max,
+        # beta_min,
+        # beta_max,
+        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
@@ -1173,16 +1279,16 @@ def LinkPrediction(
 
 if __name__ == '__main__':
     # creating dataset
-    # n_nodes = 6400
-    n_nodes = 400
+    n_nodes = 3200
+    # n_nodes = 400
 
     print("R:", np.log(n_nodes))
 
     params_dataset = {
         'n_nodes': n_nodes,
         'n_dim': 4,
-        'R': np.log(n_nodes),
-        'sigma': 1,
+        'R': np.log(n_nodes)+2,
+        'sigma': 2,
         'beta': 0.4
     }
 
@@ -1191,16 +1297,19 @@ if __name__ == '__main__':
     # burn_epochs = 5
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
-    lr_beta = 0.001
-    lr_gamma = 0.001
+    # lr_beta = 0.01
+    # lr_beta = 0.0
+    lr_kappa = 0.01
+    lr_gamma = 0.01
     sigma_max = 100.0
-    sigma_min = 0.001
-    beta_min = 0.1
-    beta_max = 10.0
+    sigma_min = 0.2
+    # beta_min = 0.1
+    # beta_max = 10.0
+    k_max = 100.0
     gamma_min = 0.1
     gamma_max = 10.0
     init_range = 0.001
-    change_learning_rate = 100
+    change_learning_rate = 10
     # others
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -1224,7 +1333,9 @@ if __name__ == '__main__':
 
     result = pd.DataFrame()
 
-    model_n_dims = [4]
+    model_n_dims = [64]
+    # model_n_dims = [32]
+    # model_n_dims = [4]
 
     positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
         adj_mat=adj_mat,
@@ -1258,12 +1369,14 @@ if __name__ == '__main__':
             n_max_negatives=n_max_negatives,
             lr_embeddings=lr_embeddings,
             lr_epoch_10=lr_epoch_10,
-            lr_beta=lr_beta,
+            # lr_beta=lr_beta,
+            lr_kappa=lr_kappa,
             lr_gamma=lr_gamma,
             sigma_min=sigma_min,
             sigma_max=sigma_max,
-            beta_min=beta_min,
-            beta_max=beta_max,
+            # beta_min=beta_min,
+            # beta_max=beta_max,
+            k_max=k_max,
             gamma_min=gamma_min,
             gamma_max=gamma_max,
             change_learning_rate=change_learning_rate,
@@ -1301,12 +1414,14 @@ if __name__ == '__main__':
         ret["n_max_negatives"] = n_max_negatives
         ret["lr_embeddings"] = lr_embeddings
         ret["lr_epoch_10"] = lr_epoch_10
-        ret["lr_beta"] = lr_beta
+        # ret["lr_beta"] = lr_beta
+        ret["lr_kappa"] = lr_kappa
         ret["lr_gamma"] = lr_gamma
         ret["sigma_max"] = sigma_max
         ret["sigma_min"] = sigma_min
-        ret["beta_max"] = beta_max
-        ret["beta_min"] = beta_min
+        ret["k_max"] = k_max
+        # ret["beta_max"] = beta_max
+        # ret["beta_min"] = beta_min
         ret["gamma_max"] = gamma_max
         ret["gamma_min"] = gamma_min
         ret["init_range"] = init_range
@@ -1352,12 +1467,14 @@ if __name__ == '__main__':
             "n_max_negatives",
             "lr_embeddings",
             "lr_epoch_10",
-            "lr_beta",
+            # "lr_beta",
+            "lr_kappa",
             "lr_gamma",
             "sigma_max",
             "sigma_min",
-            "beta_max",
-            "beta_min",
+            "k_max",
+            # "beta_max",
+            # "beta_min",
             "gamma_max",
             "gamma_min",
             "init_range"
