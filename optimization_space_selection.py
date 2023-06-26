@@ -47,14 +47,8 @@ from utils.utils_dataset import (
     NegGraph,
     create_test_for_link_prediction,
     create_dataset_for_basescore,
-    create_dataset
-)
-from datasets import (
-    hyperbolic_geometric_graph,
-    connection_prob,
-    wrapped_normal_distribution,
-    euclidean_geometric_graph,
-    init_HGG
+    create_dataset,
+    hyperbolic_geometric_graph
 )
 from space_selection import RSGD, Lorentz, Euclidean, Spherical
 
@@ -333,8 +327,8 @@ if __name__ == '__main__':
     burn_epochs = 800
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
-    lr_beta = 0.001
-    lr_gamma = 0.001
+    lr_beta = 0.01
+    lr_gamma = 0.01
     sigma_max = 100.0
     sigma_min = 0.001
     beta_min = 0.1
