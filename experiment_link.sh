@@ -1,36 +1,13 @@
 #!/bin/bash
-echo "dataset: $1"
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 2 0"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 3 1"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 4 2"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 5 3"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 6 0"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 7 1"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 8 2"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 9 3"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 10 0"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 11 1"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 12 2"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 13 3"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 14 0"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 15 1"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 16 2"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 32 3"
-sleep 2
-screen -dm bash -c "conda activate embed; python experiment_realworld_lorentz.py ${1} 64 3"
-sleep 2
+echo "dataset: ${1}"
+model_n_dims=(2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 32 64)
+device=0
+n_devices=4
+for model_n_dim in "${model_n_dims[@]}"
+do
+    echo "conda activate embed; python experiment_realworld_space.py ${1} ${model_n_dim} ${device}"
+    screen -dm bash -c "conda activate embed; python experiment_realworld_space.py ${1} ${model_n_dim} ${device}"
+    sleep 2
+    device=$((device+1))
+    device=$((device % n_devices))
+done

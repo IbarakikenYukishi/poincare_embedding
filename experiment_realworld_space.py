@@ -8,7 +8,7 @@ import gc
 import time
 from copy import deepcopy
 from torch.utils.data import DataLoader
-from lorentz import LinkPrediction
+from space_selection import LinkPrediction
 from utils.utils_dataset import create_test_for_link_prediction
 import torch.multiprocessing as multi
 from functools import partial
@@ -36,12 +36,11 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     params_dataset = {
         'n_nodes': n_nodes,
         'R': np.log(n_nodes) + 4,
-        # 'R': max(np.log(n_nodes), 12.0),
     }
 
     # パラメータ
     burn_epochs = 800
-    # burn_epochs = 2
+    # burn_epochs = 15
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     n_max_negatives = n_max_positives * 10
@@ -49,18 +48,20 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     lr_epoch_10 = 10.0 * \
         (burn_batch_size * (n_max_positives + n_max_negatives)) / \
         32 / 100  # batchサイズに対応して学習率変更
-    lr_beta = 0.001
+    lr_kappa = 0.001
     lr_gamma = 0.001
-    sigma_max = 1.0
-    sigma_min = 0.1
-    beta_min = 0.1
-    beta_max = 10.0
+    # lr_gamma = 0.01
+    sigma_max = 100.0
+    sigma_min = 0.2
+    # sigma_min = 0.001
+    # beta_min = 0.1
+    # beta_max = 10.0
+    k_max = 100
     gamma_min = 0.1
     gamma_max = 10.0
-    eps_1 = 1e-6
-    eps_2 = 1e3
     init_range = 0.001
     perturbation = True
+    change_learning_rate = 100
     # それ以外
     loader_workers = 16
     print("loader_workers: ", loader_workers)
@@ -79,7 +80,6 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         positive_samples=positive_samples,
         negative_samples=negative_samples,
         lik_data=lik_data,
-        x_lorentz=None,
         params_dataset=params_dataset,
         model_n_dim=model_n_dim,
         burn_epochs=burn_epochs,
@@ -88,61 +88,57 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         n_max_negatives=n_max_negatives,
         lr_embeddings=lr_embeddings,
         lr_epoch_10=lr_epoch_10,
-        lr_beta=lr_beta,
+        lr_kappa=lr_kappa,
         lr_gamma=lr_gamma,
         sigma_min=sigma_min,
         sigma_max=sigma_max,
-        beta_min=beta_min,
-        beta_max=beta_max,
+        # beta_min=beta_min,
+        # beta_max=beta_max,
+        k_max=k_max,
         gamma_min=gamma_min,
         gamma_max=gamma_max,
-        eps_1=eps_1,
-        eps_2=eps_2,
         init_range=init_range,
         device=device,
-        calc_HGG=True,
-        calc_WND=True,
-        calc_naive=True,
+        calc_lorentz=True,
+        calc_euclidean=True,
+        calc_spherical=True,
+        # calc_spherical=False, # 球面の計算はひとまずしない
         calc_othermetrics=True,
-        calc_groundtruth=False,
         perturbation=perturbation,
+        change_learning_rate=change_learning_rate,
         loader_workers=16,
         shuffle=True,
         sparse=False
     )
-    torch.save(ret["model_hgg"], RESULTS + "/" + dataset_name +
-               "/result_" + str(model_n_dim) + "_hgg.pth")
-    torch.save(ret["model_wnd"], RESULTS + "/" + dataset_name +
-               "/result_" + str(model_n_dim) + "_wnd.pth")
-    torch.save(ret["model_naive"], RESULTS + "/" + dataset_name +
-               "/result_" + str(model_n_dim) + "_naive.pth")
+    torch.save(ret["model_lorentz_latent"], RESULTS + "/" + dataset_name +
+               "/result_" + str(model_n_dim) + "_lorentz_latent.pth")
+    torch.save(ret["model_euclidean_latent"], RESULTS + "/" + dataset_name +
+               "/result_" + str(model_n_dim) + "_euclidean_latent.pth")
+    torch.save(ret["model_spherical_latent"], RESULTS + "/" + dataset_name +
+               "/result_" + str(model_n_dim) + "_spherical_latent.pth")
 
-    ret.pop('model_hgg')
-    ret.pop('model_wnd')
-    ret.pop('model_naive')
+    ret.pop('model_lorentz_latent')
+    ret.pop('model_euclidean_latent')
+    ret.pop('model_spherical_latent')
 
     ret["model_n_dims"] = model_n_dim
     ret["n_nodes"] = params_dataset["n_nodes"]
-    # ret["n_dim"] = params_dataset["n_dim"]
     ret["R"] = params_dataset["R"]
-    # ret["sigma"] = params_dataset["sigma"]
-    # ret["beta"] = params_dataset["beta"]
     ret["burn_epochs"] = burn_epochs
     ret["burn_batch_size"] = burn_batch_size
     ret["n_max_positives"] = n_max_positives
     ret["n_max_negatives"] = n_max_negatives
     ret["lr_embeddings"] = lr_embeddings
     ret["lr_epoch_10"] = lr_epoch_10
-    ret["lr_beta"] = lr_beta
+    ret["lr_kappa"] = lr_kappa
     ret["lr_gamma"] = lr_gamma
     ret["sigma_max"] = sigma_max
     ret["sigma_min"] = sigma_min
-    ret["beta_max"] = beta_max
-    ret["beta_min"] = beta_min
+    # ret["beta_max"] = beta_max
+    # ret["beta_min"] = beta_min
+    ret["k_max"] = k_max
     ret["gamma_max"] = gamma_max
     ret["gamma_min"] = gamma_min
-    ret["eps_1"] = eps_1
-    ret["eps_2"] = eps_2
     ret["init_range"] = init_range
 
     row = pd.DataFrame(ret.values(), index=ret.keys()).T
@@ -150,51 +146,49 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     row = row.reindex(columns=[
         "model_n_dims",
         "n_nodes",
-        # "n_dim",
         "R",
-        # "sigma",
-        # "beta",
-        "DNML_HGG",
-        "AIC_HGG",
-        "BIC_HGG",
-        "DNML_WND",
-        "AIC_WND",
-        "BIC_WND",
-        "AIC_naive",
-        "BIC_naive",
-        "AUC_HGG",
-        "AUC_WND",
-        "AUC_naive",
-        # "AUC_GT",
-        # "cor_hgg",
-        # "cor_wnd",
-        # "cor_naive",
-        "-log p_HGG(y, z)",
-        "-log p_HGG(y|z)",
-        "-log p_HGG(z)",
-        "-log p_WND(y, z)",
-        "-log p_WND(y|z)",
-        "-log p_WND(z)",
-        "-log p_naive(y; z)",
-        "pc_hgg_first",
-        "pc_hgg_second",
-        "pc_wnd_first",
-        "pc_wnd_second",
+        "DNML_lorentz",
+        "DNML_euclidean",
+        "DNML_spherical",
+        "AIC_lorentz",
+        "AIC_euclidean",
+        "AIC_spherical",
+        "BIC_lorentz",
+        "BIC_euclidean",
+        "BIC_spherical",
+        "AUC_lorentz",
+        "AUC_euclidean",
+        "AUC_spherical",
+        "-log p_lorentz(y, z)",
+        "-log p_lorentz(y|z)",
+        "-log p_lorentz(z)",
+        "-log p_euclidean(y, z)",
+        "-log p_euclidean(y|z)",
+        "-log p_euclidean(z)",
+        "-log p_spherical(y, z)",
+        "-log p_spherical(y|z)",
+        "-log p_spherical(z)",
+        "pc_lorentz_first",
+        "pc_lorentz_second",
+        "pc_euclidean_first",
+        "pc_euclidean_second",
+        "pc_spherical_first",
+        "pc_spherical_second",
         "burn_epochs",
         "n_max_positives",
         "n_max_negatives",
         "lr_embeddings",
         "lr_epoch_10",
-        "lr_beta",
+        # "lr_beta",
+        "lr_kappa",
         "lr_gamma",
         "sigma_max",
         "sigma_min",
-        "beta_max",
-        "beta_min",
+        # "beta_max",
+        # "beta_min",
+        "k_max",
         "gamma_max",
         "gamma_min",
-        "eps_1",
-        "eps_2",
         "init_range"
     ]
     )
