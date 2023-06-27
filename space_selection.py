@@ -111,13 +111,6 @@ class RSGD(optim.Optimizer):
             kappa = group["params"][0]
             gamma = group["params"][1]
 
-            # beta_update = beta.data - \
-            #     group["lr_beta"] * beta.grad.data
-            # beta_update = max(beta_update, group["beta_min"])
-            # beta_update = min(beta_update, group["beta_max"])
-            # if not math.isnan(beta_update):
-            #     beta.data.copy_(torch.tensor(beta_update))
-
             if kappa != 0:
                 kappa_update = kappa.data - \
                     group["lr_kappa"] * kappa.grad.data
@@ -646,7 +639,6 @@ class Spherical(BaseEmbedding):
             device=device,
             calc_latent=calc_latent
         )
-        # self.beta = nn.Parameter(torch.tensor(beta))
         self.kappa = nn.Parameter(torch.tensor(kappa))
         self.gamma = nn.Parameter(torch.tensor(gamma))
         self.sigma = sigma.to(self.device)
@@ -802,13 +794,10 @@ def LinkPrediction(
     n_max_negatives,
     lr_embeddings,
     lr_epoch_10,
-    # lr_beta,
     lr_kappa,
     lr_gamma,
     sigma_min,
     sigma_max,
-    # beta_min,
-    # beta_max,
     k_max,
     gamma_min,
     gamma_max,
@@ -843,9 +832,7 @@ def LinkPrediction(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,
         R=params_dataset['R'],
-        # k=-1,
         sigma=torch.ones(model_n_dim),
-        # beta=1.0,
         kappa=-1.0,
         gamma=params_dataset['R'],
         init_range=init_range,
@@ -858,8 +845,6 @@ def LinkPrediction(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,
         sigma=torch.ones(model_n_dim),
-        # beta=1.0,
-        # kappa=1.0,
         gamma=params_dataset['R'],
         init_range=init_range,
         sparse=sparse,
@@ -871,9 +856,7 @@ def LinkPrediction(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,
         sigma=torch.ones(model_n_dim) * sigma_min,
-        # beta=1.0,
         kappa=1.0,
-        # k=1,
         gamma=params_dataset['R'],
         init_range=init_range,
         sparse=sparse,
@@ -1130,9 +1113,6 @@ def LinkPrediction(
 
     # Lorentz
     pc_lorentz_first, pc_lorentz_second = model_lorentz_latent.get_PC(
-        # beta_min,
-        # beta_max,
-        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
@@ -1146,9 +1126,6 @@ def LinkPrediction(
 
     # Euclidean
     pc_euclidean_first, pc_euclidean_second = model_euclidean_latent.get_PC(
-        # beta_min,
-        # beta_max,
-        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
@@ -1163,9 +1140,6 @@ def LinkPrediction(
 
     # Spherical
     pc_spherical_first, pc_spherical_second = model_spherical_latent.get_PC(
-        # beta_min,
-        # beta_max,
-        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
@@ -1297,14 +1271,10 @@ if __name__ == '__main__':
     # burn_epochs = 5
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
-    # lr_beta = 0.01
-    # lr_beta = 0.0
     lr_kappa = 0.01
     lr_gamma = 0.01
     sigma_max = 100.0
     sigma_min = 0.2
-    # beta_min = 0.1
-    # beta_max = 10.0
     k_max = 100.0
     gamma_min = 0.1
     gamma_max = 10.0
@@ -1369,13 +1339,10 @@ if __name__ == '__main__':
             n_max_negatives=n_max_negatives,
             lr_embeddings=lr_embeddings,
             lr_epoch_10=lr_epoch_10,
-            # lr_beta=lr_beta,
             lr_kappa=lr_kappa,
             lr_gamma=lr_gamma,
             sigma_min=sigma_min,
             sigma_max=sigma_max,
-            # beta_min=beta_min,
-            # beta_max=beta_max,
             k_max=k_max,
             gamma_min=gamma_min,
             gamma_max=gamma_max,
@@ -1414,14 +1381,11 @@ if __name__ == '__main__':
         ret["n_max_negatives"] = n_max_negatives
         ret["lr_embeddings"] = lr_embeddings
         ret["lr_epoch_10"] = lr_epoch_10
-        # ret["lr_beta"] = lr_beta
         ret["lr_kappa"] = lr_kappa
         ret["lr_gamma"] = lr_gamma
         ret["sigma_max"] = sigma_max
         ret["sigma_min"] = sigma_min
         ret["k_max"] = k_max
-        # ret["beta_max"] = beta_max
-        # ret["beta_min"] = beta_min
         ret["gamma_max"] = gamma_max
         ret["gamma_min"] = gamma_min
         ret["init_range"] = init_range
@@ -1467,14 +1431,11 @@ if __name__ == '__main__':
             "n_max_negatives",
             "lr_embeddings",
             "lr_epoch_10",
-            # "lr_beta",
             "lr_kappa",
             "lr_gamma",
             "sigma_max",
             "sigma_min",
             "k_max",
-            # "beta_max",
-            # "beta_min",
             "gamma_max",
             "gamma_min",
             "init_range"
