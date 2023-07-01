@@ -48,21 +48,20 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     lr_epoch_10 = 10.0 * \
         (burn_batch_size * (n_max_positives + n_max_negatives)) / \
         32 / 100  # batchサイズに対応して学習率変更
-    lr_kappa = 0.001
-    lr_gamma = 0.001
+    # lr_kappa = 0.004
+    # lr_gamma = 0.004
+    lr_kappa = 1.0
+    lr_gamma = 1.0
     # lr_gamma = 0.01
     sigma_max = 100.0
     sigma_min = 0.2
-    # sigma_min = 0.001
-    # beta_min = 0.1
-    # beta_max = 10.0
     k_max = 100
     gamma_min = 0.1
     gamma_max = 10.0
     init_range = 0.001
     perturbation = True
     change_learning_rate = 100
-    # それ以外
+    # others
     loader_workers = 16
     print("loader_workers: ", loader_workers)
     shuffle = True
@@ -92,17 +91,17 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         lr_gamma=lr_gamma,
         sigma_min=sigma_min,
         sigma_max=sigma_max,
-        # beta_min=beta_min,
-        # beta_max=beta_max,
         k_max=k_max,
         gamma_min=gamma_min,
         gamma_max=gamma_max,
         init_range=init_range,
         device=device,
-        calc_lorentz=True,
-        calc_euclidean=True,
-        calc_spherical=True,
-        # calc_spherical=False, # 球面の計算はひとまずしない
+        calc_lorentz_latent=True,
+        calc_euclidean_latent=True,
+        calc_spherical_latent=True,
+        calc_lorentz_naive=True,
+        calc_euclidean_naive=True,
+        calc_spherical_naive=True,
         calc_othermetrics=True,
         perturbation=perturbation,
         change_learning_rate=change_learning_rate,
@@ -116,10 +115,19 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
                "/result_" + str(model_n_dim) + "_euclidean_latent.pth")
     torch.save(ret["model_spherical_latent"], RESULTS + "/" + dataset_name +
                "/result_" + str(model_n_dim) + "_spherical_latent.pth")
+    torch.save(ret["model_lorentz_naive"], RESULTS + "/" + dataset_name +
+               "/result_" + str(model_n_dim) + "_lorentz_naive.pth")
+    torch.save(ret["model_euclidean_naive"], RESULTS + "/" + dataset_name +
+               "/result_" + str(model_n_dim) + "_euclidean_naive.pth")
+    torch.save(ret["model_spherical_naive"], RESULTS + "/" + dataset_name +
+               "/result_" + str(model_n_dim) + "_spherical_naive.pth")
 
     ret.pop('model_lorentz_latent')
     ret.pop('model_euclidean_latent')
     ret.pop('model_spherical_latent')
+    ret.pop('model_lorentz_naive')
+    ret.pop('model_euclidean_naive')
+    ret.pop('model_spherical_naive')
 
     ret["model_n_dims"] = model_n_dim
     ret["n_nodes"] = params_dataset["n_nodes"]
@@ -134,8 +142,6 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
     ret["lr_gamma"] = lr_gamma
     ret["sigma_max"] = sigma_max
     ret["sigma_min"] = sigma_min
-    # ret["beta_max"] = beta_max
-    # ret["beta_min"] = beta_min
     ret["k_max"] = k_max
     ret["gamma_max"] = gamma_max
     ret["gamma_min"] = gamma_min
@@ -147,27 +153,39 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         "model_n_dims",
         "n_nodes",
         "R",
-        "DNML_lorentz",
-        "DNML_euclidean",
-        "DNML_spherical",
-        "AIC_lorentz",
-        "AIC_euclidean",
-        "AIC_spherical",
-        "BIC_lorentz",
-        "BIC_euclidean",
-        "BIC_spherical",
-        "AUC_lorentz",
-        "AUC_euclidean",
-        "AUC_spherical",
-        "-log p_lorentz(y, z)",
-        "-log p_lorentz(y|z)",
-        "-log p_lorentz(z)",
-        "-log p_euclidean(y, z)",
-        "-log p_euclidean(y|z)",
-        "-log p_euclidean(z)",
-        "-log p_spherical(y, z)",
-        "-log p_spherical(y|z)",
-        "-log p_spherical(z)",
+        "DNML_lorentz_latent",
+        "DNML_euclidean_latent",
+        "DNML_spherical_latent",
+        "AIC_lorentz_latent",
+        "AIC_euclidean_latent",
+        "AIC_spherical_latent",
+        "AIC_lorentz_naive",
+        "AIC_euclidean_naive",
+        "AIC_spherical_naive",
+        "BIC_lorentz_latent",
+        "BIC_euclidean_latent",
+        "BIC_spherical_latent",
+        "BIC_lorentz_naive",
+        "BIC_euclidean_naive",
+        "BIC_spherical_naive",
+        "AUC_lorentz_latent",
+        "AUC_euclidean_latent",
+        "AUC_spherical_latent",
+        "AUC_lorentz_naive",
+        "AUC_euclidean_naive",
+        "AUC_spherical_naive",
+        "-log p_lorentz_latent(y, z)",
+        "-log p_lorentz_latent(y|z)",
+        "-log p_lorentz_latent(z)",
+        "-log p_lorentz_naive(y|z)",
+        "-log p_euclidean_latent(y, z)",
+        "-log p_euclidean_latent(y|z)",
+        "-log p_euclidean_latent(z)",
+        "-log p_euclidean_naive(y|z)",
+        "-log p_spherical_latent(y, z)",
+        "-log p_spherical_latent(y|z)",
+        "-log p_spherical_latent(z)",
+        "-log p_spherical_naive(y|z)",
         "pc_lorentz_first",
         "pc_lorentz_second",
         "pc_euclidean_first",
@@ -179,13 +197,10 @@ def calc_metrics_realworld(dataset_name, device_idx, model_n_dim):
         "n_max_negatives",
         "lr_embeddings",
         "lr_epoch_10",
-        # "lr_beta",
         "lr_kappa",
         "lr_gamma",
         "sigma_max",
         "sigma_min",
-        # "beta_max",
-        # "beta_min",
         "k_max",
         "gamma_max",
         "gamma_min",
@@ -264,6 +279,26 @@ if __name__ == '__main__':
         dataset_name = "pubmed"
     elif int(args.dataset) == 7:
         dataset_name = "bio-yeast-protein-inter"
+    elif int(args.dataset) == 8:
+        dataset_name = "mammal"
+    elif int(args.dataset) == 9:
+        dataset_name = "solid"
+    elif int(args.dataset) == 10:
+        dataset_name = "tree"
+    elif int(args.dataset) == 11:
+        dataset_name = "worker"
+    elif int(args.dataset) == 12:
+        dataset_name = "adult"
+    elif int(args.dataset) == 13:
+        dataset_name = "instrument"
+    elif int(args.dataset) == 14:
+        dataset_name = "leader"
+    elif int(args.dataset) == 15:
+        dataset_name = "implement"
+    elif int(args.dataset) == 16:
+        dataset_name = "inf-euroroad"
+    elif int(args.dataset) == 17:
+        dataset_name = "inf-power"
 
     os.makedirs(RESULTS + "/" + dataset_name, exist_ok=True)
 
