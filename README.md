@@ -1,4 +1,4 @@
-# DNML-HGG
+# Dimensionality and Curvature Selection using Decomposed Normalized Maximum Likelihood Code-Length
 
 ## 1. About
 This repository contains the implementation code of dimensionality and curvature selection.
