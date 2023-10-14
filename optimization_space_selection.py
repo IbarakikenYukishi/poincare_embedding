@@ -196,7 +196,7 @@ def visualize_training(
     embedding_euclidean = []
     embedding_spherical = []
 
-    change_learning_rate = 100
+    change_learning_rate = 10
 
     for epoch in range(burn_epochs):
         if epoch == change_learning_rate:
@@ -323,8 +323,8 @@ if __name__ == '__main__':
     # lik_data = data["lik_data"]
 
     # parameters
-    # burn_epochs = 20
-    burn_epochs = 800
+    burn_epochs = 20
+    # burn_epochs = 800
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
     lr_beta = 0.01
@@ -414,6 +414,7 @@ if __name__ == '__main__':
             calc_euclidean=True,
             calc_spherical=True,
             perturbation=True,
+            # change_learning_rate=10,
             loader_workers=16,
             shuffle=True,
             sparse=False

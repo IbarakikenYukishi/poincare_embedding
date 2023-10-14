@@ -263,42 +263,56 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
 
+    # if int(args.dataset) == 0:
+    #     dataset_name = "ca-AstroPh"
+    # elif int(args.dataset) == 1:
+    #     dataset_name = "ca-CondMat"
+    # elif int(args.dataset) == 2:
+    #     dataset_name = "ca-GrQc"
+    # elif int(args.dataset) == 3:
+    #     dataset_name = "ca-HepPh"
+    # elif int(args.dataset) == 4:
+    #     dataset_name = "airport"
+    # elif int(args.dataset) == 5:
+    #     dataset_name = "cora"
+    # elif int(args.dataset) == 6:
+    #     dataset_name = "pubmed"
+    # elif int(args.dataset) == 7:
+    #     dataset_name = "bio-yeast-protein-inter"
+    # elif int(args.dataset) == 8:
+    #     dataset_name = "mammal"
+    # elif int(args.dataset) == 9:
+    #     dataset_name = "solid"
+    # elif int(args.dataset) == 10:
+    #     dataset_name = "tree"
+    # elif int(args.dataset) == 11:
+    #     dataset_name = "worker"
+    # elif int(args.dataset) == 12:
+    #     dataset_name = "adult"
+    # elif int(args.dataset) == 13:
+    #     dataset_name = "instrument"
+    # elif int(args.dataset) == 14:
+    #     dataset_name = "leader"
+    # elif int(args.dataset) == 15:
+    #     dataset_name = "implement"
+    # elif int(args.dataset) == 16:
+    #     dataset_name = "inf-euroroad"
+    # elif int(args.dataset) == 17:
+    #     dataset_name = "inf-power"
+
     if int(args.dataset) == 0:
         dataset_name = "ca-AstroPh"
     elif int(args.dataset) == 1:
-        dataset_name = "ca-CondMat"
-    elif int(args.dataset) == 2:
-        dataset_name = "ca-GrQc"
-    elif int(args.dataset) == 3:
         dataset_name = "ca-HepPh"
-    elif int(args.dataset) == 4:
+    elif int(args.dataset) == 2:
         dataset_name = "airport"
-    elif int(args.dataset) == 5:
-        dataset_name = "cora"
-    elif int(args.dataset) == 6:
-        dataset_name = "pubmed"
-    elif int(args.dataset) == 7:
-        dataset_name = "bio-yeast-protein-inter"
-    elif int(args.dataset) == 8:
+    elif int(args.dataset) == 3:
         dataset_name = "mammal"
-    elif int(args.dataset) == 9:
+    elif int(args.dataset) == 4:
         dataset_name = "solid"
-    elif int(args.dataset) == 10:
-        dataset_name = "tree"
-    elif int(args.dataset) == 11:
-        dataset_name = "worker"
-    elif int(args.dataset) == 12:
-        dataset_name = "adult"
-    elif int(args.dataset) == 13:
-        dataset_name = "instrument"
-    elif int(args.dataset) == 14:
-        dataset_name = "leader"
-    elif int(args.dataset) == 15:
-        dataset_name = "implement"
-    elif int(args.dataset) == 16:
-        dataset_name = "inf-euroroad"
-    elif int(args.dataset) == 17:
-        dataset_name = "inf-power"
+
+
+
 
     os.makedirs(RESULTS + "/" + dataset_name, exist_ok=True)
 

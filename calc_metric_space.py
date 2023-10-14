@@ -1257,6 +1257,6 @@ if __name__ == "__main__":
     # artificial("WND")
     # print("Results of Scientific Collaboration Networks")
     # realworld_stats()
-    # realworld()
+    realworld()
     # print("Results of WN dataset")
     # wn_dataset()

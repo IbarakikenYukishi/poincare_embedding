@@ -1,7 +1,7 @@
 # DNML-HGG
 
 ## 1. About
-This repository contains the implementation code of DNML-PUD and DNML-WND.
+This repository contains the implementation code of dimensionality and curvature selection.
 
 ## 2. Environment
 - CPU: AMD EPYC 7452 (32 core) 2.35GHz

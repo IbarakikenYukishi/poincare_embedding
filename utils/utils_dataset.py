@@ -403,12 +403,18 @@ def generate_wnd(inputs):
     return inputs, avg_deg
 
 
-def connection_prob(d, beta, gamma):
+# def connection_prob(d, beta, gamma):
+#     """
+#     接続確率
+#     """
+#     return 1 / (1 + np.exp(beta * d - gamma))
+
+
+def connection_prob(d, gamma):
     """
     接続確率
     """
-    return 1 / (1 + np.exp(beta * d - gamma))
-
+    return 1 / (1 + np.exp(d - gamma))
 
 def integral_sin(n, theta):
     if n == 0:

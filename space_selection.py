@@ -150,20 +150,35 @@ class RSGD(optim.Optimizer):
                     p.data.copy_(update)
 
                     if group["perturbation"]:
-                        r = torch.sqrt(
-                            dist_k(p, torch.zeros(D).to(group["device"]), k=0))
+                        # r = torch.sqrt(
+                        #     dist_k(p, torch.zeros(D).to(group["device"]), k=0))
+                        # r = torch.where(r <= 1e-5)
+                        # perturbation = torch.normal(
+                        #     0.0, 0.0001, size=(len(r), D)).to(p.device)
+                        # p.data.copy_(
+                        #     projection_k(p[r, :] + perturbation, group["k"], group["R"]))
+                        # r = torch.sqrt(
+                        #     dist_k(p, torch.zeros(D).to(group["device"]), k=0))
+                        # r = torch.where(r <= 1e-5)
                         perturbation = torch.normal(
-                            0.0, 0.0001, size=(len(r), D)).to(p.device)
+                            0.0, 0.0001, size=(len(p), D)).to(p.device)
+                        p.data.copy_(
+                            projection_k(p + perturbation, group["k"], group["R"]))
+
                 else:  # hyperbolic and spherical case
                     B, D = p.size()
-                    gl = torch.eye(D, device=p.device, dtype=p.dtype)
+                    # gl = torch.eye(D, device=p.device, dtype=p.dtype)
+                    gl = torch.ones(D, device=p.device, dtype=p.dtype)
+
+                    # if group["k"] < 0:
+                    #     gl[0, 0] = -1
                     if group["k"] < 0:
-                        gl[0, 0] = -1
+                        gl[0] = -1
                     grad_norm = torch.norm(p.grad.data)
                     grad_norm = torch.where(
                         grad_norm > 1, grad_norm, torch.tensor(1.0, device=p.device))
                     # normalize if and only if grad_norm is more than 1
-                    h = (p.grad.data / grad_norm) @ gl
+                    h = (p.grad.data / grad_norm) * gl
                     proj = (
                         h
                         - group["k"] * (
@@ -171,8 +186,14 @@ class RSGD(optim.Optimizer):
                         ).unsqueeze(1)
                         * p
                     )
-                    update = exp_map_k(
-                        p, -group["lr_embeddings"] * proj, group["k"])
+                    if group["k"] > 0:
+                        # update = exp_map_k(
+                        # p, -group["lr_embeddings"] * 10 * proj, group["k"])
+                        update = exp_map_k(
+                            p, -group["lr_embeddings"] * proj, group["k"])
+                    else:
+                        update = exp_map_k(
+                            p, -group["lr_embeddings"] * proj, group["k"])
                     is_nan_inf = torch.isnan(update) | torch.isinf(update)
                     update = torch.where(is_nan_inf, p, update)
                     update = projection_k(update, group["k"], group["R"])
@@ -184,11 +205,11 @@ class RSGD(optim.Optimizer):
                     p.data.copy_(update)
 
                     if group["perturbation"]:
-                        r = arcos_k(
-                            np.sqrt(abs(group["k"])) * p[:, 0], group["k"]).double() / np.sqrt(abs(group["k"]))
-                        r = torch.where(r <= 1e-5)
+                        # r = arcos_k(
+                        #     1/np.sqrt(abs(group["k"])) * p[:, 0], group["k"]).double() / np.sqrt(abs(group["k"]))
+                        # r = torch.where(r <= 1e-5)
                         perturbation = torch.normal(
-                            0.0, 0.0001, size=(len(r), D)).to(p.device)
+                            0.0, 0.0001, size=(len(p), D)).to(p.device)
                         p.data.copy_(
                             projection_k(p + perturbation, group["k"], group["R"]))
 
@@ -300,23 +321,6 @@ class BaseEmbedding(nn.Module):
 
         return lik_z
 
-    # def calc_probability(
-    #     self,
-    #     samples,
-    # ):
-    #     samples_ = torch.Tensor(samples).to(self.device).long()
-
-    #     # 座標を取得
-    #     us = self.table(samples_[:, 0])
-    #     vs = self.table(samples_[:, 1])
-
-    #     dist = dist_k(us, vs, k)
-    #     p = torch.exp(-torch.logaddexp(torch.tensor([0.0]).to(
-    #         self.device), self.beta * (dist - self.R)))
-    #     print(p)
-
-    #     return p.detach().cpu().numpy()
-
     def calc_dist(
         self,
         samples,
@@ -415,50 +419,50 @@ class Euclidean(BaseEmbedding):
 
     def get_PC(
         self,
-        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
         sigma_max,
         sampling
     ):
-        # if sampling == False:
-        #     x_e = self.get_table()
-        # else:
-        #     idx = np.array(range(self.n_nodes))
-        #     idx = np.random.permutation(
-        #         idx)[:min(int(self.n_nodes * 0.1), 100)]
-        #     x_e = self.get_table()[idx, :]
+        if sampling == False:
+            x_e = self.get_table()
+        else:
+            idx = np.array(range(self.n_nodes))
+            idx = np.random.permutation(
+                idx)[:min(int(self.n_nodes * 0.1), 100)]
+            x_e = self.get_table()[idx, :]
 
-        # n_nodes_sample = len(x_e)
-        # print(n_nodes_sample)
+        n_nodes_sample = len(x_e)
+        print(n_nodes_sample)
 
-        # def distance_mat(X, Y):
-        #     X = X[:, np.newaxis, :]
-        #     Y = Y[np.newaxis, :, :]
-        #     Z = np.sqrt(np.sum((X - Y) ** 2, axis=2))
-        #     return Z
+        def distance_mat(X, Y):
+            X = X[:, np.newaxis, :]
+            Y = Y[np.newaxis, :, :]
+            Z = np.sqrt(np.sum((X - Y) ** 2, axis=2))
+            return Z
 
-        # # print(x_e)
+        # print(x_e)
 
-        # dist_mat = distance_mat(x_e, x_e)
+        dist_mat = distance_mat(x_e, x_e)
 
-        # # print(dist_mat)
+        # print(dist_mat)
 
-        # is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
-        # dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
-        # X = dist_mat
-        # for i in range(n_nodes_sample):
-        #     X[i, i] = 0
+        is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
+        dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
+        X = dist_mat
+        for i in range(n_nodes_sample):
+            X[i, i] = 0
 
-        # sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
+        sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
 
         # integral, _ = integrate.dblquad(sqrt_I_n_, gamma_min,
         #                                 gamma_max, beta_min, beta_max)
-        # ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
-        #     np.log(integral)
+        integral, _ = integrate.quad(sqrt_I_n_, gamma_min, gamma_max)
+        ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
+            np.log(integral)
 
-        ret_1 = 0
+        # ret_1 = 0
 
         ret_2 = - self.n_dim * gammaln(self.n_nodes / 2) + (self.n_nodes * self.n_dim / 2) * np.log(
             self.n_nodes / (2 * np.e)) + self.n_dim * (np.log(np.log(sigma_max) - np.log(sigma_min)))
@@ -562,50 +566,49 @@ class Lorentz(BaseEmbedding):
 
     def get_PC(
         self,
-        # beta_min,
-        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
         sigma_max,
         sampling
     ):
-        # if sampling == False:
-        #     x_e = self.get_table()
-        # else:
-        #     idx = np.array(range(self.n_nodes))
-        #     idx = np.random.permutation(
-        #         idx)[:min(int(self.n_nodes * 0.1), 100)]
-        #     x_e = self.get_table()[idx, :]
+        if sampling == False:
+            x_e = self.get_table()
+        else:
+            idx = np.array(range(self.n_nodes))
+            idx = np.random.permutation(
+                idx)[:min(int(self.n_nodes * 0.1), 100)]
+            x_e = self.get_table()[idx, :]
 
-        # n_nodes_sample = len(x_e)
-        # print(n_nodes_sample)
+        n_nodes_sample = len(x_e)
+        print(n_nodes_sample)
 
-        # # lorentz scalar product
-        # first_term = - x_e[:, :1] * x_e[:, :1].T
-        # remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
-        # adj_mat = - (first_term + remaining)
+        # lorentz scalar product
+        first_term = - x_e[:, :1] * x_e[:, :1].T
+        remaining = x_e[:, 1:].dot(x_e[:, 1:].T)
+        adj_mat = - (first_term + remaining)
 
-        # for i in range(n_nodes_sample):
-        #     adj_mat[i, i] = 1
-        # # distance matrix
-        # dist_mat = np.arccosh(adj_mat)
+        for i in range(n_nodes_sample):
+            adj_mat[i, i] = 1
+        # distance matrix
+        dist_mat = np.arccosh(adj_mat)
 
-        # is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
-        # dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
-        # X = dist_mat
-        # # dist_mat
-        # for i in range(n_nodes_sample):
-        #     X[i, i] = 0
+        is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
+        dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
+        X = dist_mat
+        # dist_mat
+        for i in range(n_nodes_sample):
+            X[i, i] = 0
 
-        # sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
+        sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
 
         # integral, _ = integrate.dblquad(sqrt_I_n_, gamma_min,
         #                                 gamma_max, beta_min, beta_max)
-        # ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
-        #     np.log(integral)
+        integral, _ = integrate.quad(sqrt_I_n_, gamma_min, gamma_max)
+        ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
+            np.log(integral)
 
-        ret_1 = 0
+        # ret_1 = 0
 
         ret_2 = - self.n_dim * gammaln(self.n_nodes / 2) + (self.n_nodes * self.n_dim / 2) * np.log(
             self.n_nodes / (2 * np.e)) + self.n_dim * (np.log(np.log(sigma_max) - np.log(sigma_min)))
@@ -712,8 +715,11 @@ class Spherical(BaseEmbedding):
         v_norm_k = np.sqrt(abs(self.k)) * tangent_norm_k(v_, self.k)
         v_norm_k = torch.where(
             v_norm_k <= 1e-6, torch.tensor(1e-6).to(self.device), v_norm_k)
-        lik += (self.n_dim - 1) * \
-            (torch.log(torch.abs(sin_k(v_norm_k, self.k)) + 1e-6) - torch.log(v_norm_k))
+        lik += torch.where(
+            v_norm_k <= 1e-6, torch.tensor(0.0).to(self.device), (self.n_dim - 1) *
+            (torch.log(torch.abs(sin_k(v_norm_k, self.k)) + 1e-6) - torch.log(v_norm_k)))
+        # lik += (self.n_dim - 1) * \
+        #     (torch.log(torch.abs(sin_k(v_norm_k, self.k)) + 1e-6) - torch.log(v_norm_k))
 
         return lik
 
@@ -732,48 +738,47 @@ class Spherical(BaseEmbedding):
 
     def get_PC(
         self,
-        # beta_min,
-        # k_max,
         gamma_min,
         gamma_max,
         sigma_min,
         sigma_max,
         sampling
     ):
-        # if sampling == False:
-        #     x_e = self.get_table()
-        # else:
-        #     idx = np.array(range(self.n_nodes))
-        #     idx = np.random.permutation(
-        #         idx)[:min(int(self.n_nodes * 0.1), 100)]
-        #     x_e = self.get_table()[idx, :]
+        if sampling == False:
+            x_e = self.get_table()
+        else:
+            idx = np.array(range(self.n_nodes))
+            idx = np.random.permutation(
+                idx)[:min(int(self.n_nodes * 0.1), 100)]
+            x_e = self.get_table()[idx, :]
 
-        # n_nodes_sample = len(x_e)
-        # print(n_nodes_sample)
+        n_nodes_sample = len(x_e)
+        print(n_nodes_sample)
 
-        # adj_mat = self.k * x_e.dot(x_e.T)
+        adj_mat = self.k * x_e.dot(x_e.T)
 
-        # for i in range(n_nodes_sample):
-        #     adj_mat[i, i] = 1
-        # # distance matrix
-        # dist_mat = arcos_k(adj_mat, k=self.k,
-        #                    use_torch=False) / np.sqrt(abs(self.k))
+        for i in range(n_nodes_sample):
+            adj_mat[i, i] = 1
+        # distance matrix
+        dist_mat = arcos_k(adj_mat, k=self.k,
+                           use_torch=False) / np.sqrt(abs(self.k))
 
-        # is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
-        # dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
-        # X = dist_mat
-        # # dist_mat
-        # for i in range(n_nodes_sample):
-        #     X[i, i] = 0
+        is_nan_inf = np.isnan(dist_mat) | np.isinf(dist_mat)
+        dist_mat = np.where(is_nan_inf, 2 * self.R, dist_mat)
+        X = dist_mat
+        # dist_mat
+        for i in range(n_nodes_sample):
+            X[i, i] = 0
 
-        # sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
+        sqrt_I_n_ = partial(sqrt_I_n, X=X, n_nodes_sample=n_nodes_sample)
 
         # integral, _ = integrate.dblquad(sqrt_I_n_, gamma_min,
         #                                 gamma_max, beta_min, beta_max)
-        # ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
-        #     np.log(integral)
+        integral, _ = integrate.quad(sqrt_I_n_, gamma_min, gamma_max)
+        ret_1 = (np.log(self.n_nodes) + np.log(self.n_nodes - 1) - np.log(4 * np.pi)) + \
+            np.log(integral)
 
-        ret_1 = 0
+        # ret_1 = 0
 
         ret_2 = - self.n_dim * gammaln(self.n_nodes / 2) + (self.n_nodes * self.n_dim / 2) * np.log(
             self.n_nodes / (2 * np.e)) + self.n_dim * (np.log(np.log(sigma_max) - np.log(sigma_min)))
@@ -803,9 +808,12 @@ def LinkPrediction(
     gamma_max,
     init_range,
     device,
-    calc_lorentz=True,
-    calc_euclidean=True,
-    calc_spherical=True,
+    calc_lorentz_latent=True,
+    calc_euclidean_latent=True,
+    calc_spherical_latent=True,
+    calc_lorentz_naive=True,
+    calc_euclidean_naive=True,
+    calc_spherical_naive=True,
     calc_othermetrics=True,
     perturbation=True,
     change_learning_rate=100,
@@ -839,7 +847,6 @@ def LinkPrediction(
         sparse=sparse,
         device=device,
         calc_latent=True
-        # calc_latent=False
     )
     model_euclidean_latent = Euclidean(
         n_nodes=params_dataset['n_nodes'],
@@ -850,19 +857,53 @@ def LinkPrediction(
         sparse=sparse,
         device=device,
         calc_latent=True
-        # calc_latent=False
     )
     model_spherical_latent = Spherical(
         n_nodes=params_dataset['n_nodes'],
         n_dim=model_n_dim,
         sigma=torch.ones(model_n_dim) * sigma_min,
+        # kappa=5.0,
         kappa=1.0,
-        gamma=params_dataset['R'],
+        gamma=0.2,
         init_range=init_range,
         sparse=sparse,
         device=device,
         calc_latent=True
-        # calc_latent=False
+    )
+    # model
+    model_lorentz_naive = Lorentz(
+        n_nodes=params_dataset['n_nodes'],
+        n_dim=model_n_dim,
+        R=params_dataset['R'],
+        sigma=torch.ones(model_n_dim),
+        kappa=-1.0,
+        gamma=params_dataset['R'],
+        init_range=init_range,
+        sparse=sparse,
+        device=device,
+        calc_latent=False
+    )
+    model_euclidean_naive = Euclidean(
+        n_nodes=params_dataset['n_nodes'],
+        n_dim=model_n_dim,
+        sigma=torch.ones(model_n_dim),
+        gamma=params_dataset['R'],
+        init_range=init_range,
+        sparse=sparse,
+        device=device,
+        calc_latent=False
+    )
+    model_spherical_naive = Spherical(
+        n_nodes=params_dataset['n_nodes'],
+        n_dim=model_n_dim,
+        sigma=torch.ones(model_n_dim) * sigma_min,
+        kappa=1.0,
+        # kappa=5.0,
+        gamma=0.2,
+        init_range=init_range,
+        sparse=sparse,
+        device=device,
+        calc_latent=False
     )
 
     # optimizer
@@ -873,8 +914,6 @@ def LinkPrediction(
         lr_gamma=lr_gamma,
         R=params_dataset['R'],
         k=-1,
-        # beta_max=beta_max,
-        # beta_min=beta_min,
         k_max=k_max,
         gamma_min=gamma_min,
         gamma_max=gamma_max,
@@ -884,7 +923,7 @@ def LinkPrediction(
     rsgd_euclidean_latent = RSGD(
         model_euclidean_latent.parameters(),
         lr_embeddings=lr_embeddings,
-        lr_kappa=0, # dummy argument
+        lr_kappa=0,  # dummy argument
         lr_gamma=lr_gamma,
         R=0,  # dummy argument
         k=0,  # dummy argument
@@ -907,10 +946,53 @@ def LinkPrediction(
         perturbation=perturbation,
         device=device
     )
+    rsgd_lorentz_naive = RSGD(
+        model_lorentz_naive.parameters(),
+        lr_embeddings=lr_embeddings,
+        lr_kappa=lr_kappa,
+        lr_gamma=lr_gamma,
+        R=params_dataset['R'],
+        k=-1,
+        k_max=k_max,
+        gamma_min=gamma_min,
+        gamma_max=gamma_max,
+        perturbation=perturbation,
+        device=device
+    )
+    rsgd_euclidean_naive = RSGD(
+        model_euclidean_naive.parameters(),
+        lr_embeddings=lr_embeddings,
+        lr_kappa=0,  # dummy argument
+        lr_gamma=lr_gamma,
+        R=0,  # dummy argument
+        k=0,  # dummy argument
+        k_max=k_max,
+        gamma_min=gamma_min,
+        gamma_max=gamma_max,
+        perturbation=perturbation,
+        device=device
+    )
+    rsgd_spherical_naive = RSGD(
+        model_spherical_naive.parameters(),
+        lr_embeddings=lr_embeddings,
+        lr_kappa=lr_kappa,
+        lr_gamma=lr_gamma,
+        R=0,  # dummy argument
+        k=1,
+        k_max=k_max,
+        gamma_min=gamma_min,
+        gamma_max=gamma_max,
+        perturbation=perturbation,
+        device=device
+    )
 
+    # move models to specific device
     model_lorentz_latent.to(device)
     model_euclidean_latent.to(device)
     model_spherical_latent.to(device)
+    model_lorentz_naive.to(device)
+    model_euclidean_naive.to(device)
+    model_spherical_naive.to(device)
 
     start = time.time()
 
@@ -921,12 +1003,23 @@ def LinkPrediction(
     loss_lorentz_latent_best = 999999999999
     loss_euclidean_latent_best = 999999999999
     loss_spherical_latent_best = 999999999999
+    loss_lorentz_naive_best = 999999999999
+    loss_euclidean_naive_best = 999999999999
+    loss_spherical_naive_best = 999999999999
+
     es_count_lorentz_latent = 0
     es_count_euclidean_latent = 0
     es_count_spherical_latent = 0
-    es_lorentz_latent = not calc_lorentz
-    es_euclidean_latent = not calc_euclidean
-    es_spherical_latent = not calc_spherical
+    es_count_lorentz_naive = 0
+    es_count_euclidean_naive = 0
+    es_count_spherical_naive = 0
+
+    es_lorentz_latent = not calc_lorentz_latent
+    es_euclidean_latent = not calc_euclidean_latent
+    es_spherical_latent = not calc_spherical_latent
+    es_lorentz_naive = not calc_lorentz_naive
+    es_euclidean_naive = not calc_euclidean_naive
+    es_spherical_naive = not calc_spherical_naive
 
     for epoch in range(burn_epochs):
         if epoch == change_learning_rate:
@@ -935,13 +1028,21 @@ def LinkPrediction(
                 0]["lr_embeddings"] = lr_epoch_10
             rsgd_spherical_latent.param_groups[
                 0]["lr_embeddings"] = lr_epoch_10
+            rsgd_lorentz_naive.param_groups[0]["lr_embeddings"] = lr_epoch_10
+            rsgd_euclidean_naive.param_groups[
+                0]["lr_embeddings"] = lr_epoch_10
+            rsgd_spherical_naive.param_groups[
+                0]["lr_embeddings"] = lr_epoch_10
 
         losses_lorentz_latent = []
         losses_euclidean_latent = []
         losses_spherical_latent = []
+        losses_lorentz_naive = []
+        losses_euclidean_naive = []
+        losses_spherical_naive = []
 
-        if epoch == change_learning_rate - 1 or (epoch>=change_learning_rate and epoch % 20 ==0):
-            if es_lorentz_latent and es_euclidean_latent and es_spherical_latent:
+        if epoch == change_learning_rate - 1 or (epoch >= change_learning_rate and epoch % 20 == 0):
+            if es_lorentz_latent and es_euclidean_latent and es_spherical_latent and es_lorentz_naive and es_euclidean_naive and es_spherical_naive:
                 break
             # MLE
             if not es_lorentz_latent:  # Lorentz
@@ -996,7 +1097,7 @@ def LinkPrediction(
                 rsgd_euclidean_latent.step()
                 losses_euclidean_latent.append(loss_euclidean_latent)
 
-            if not es_spherical_latent:  # Euclidean
+            if not es_spherical_latent:  # Spherical
                 rsgd_spherical_latent.zero_grad()
                 if epoch < change_learning_rate:
                     loss_spherical_latent = model_spherical_latent.lik_y_given_z(
@@ -1008,29 +1109,54 @@ def LinkPrediction(
                 rsgd_spherical_latent.step()
                 losses_spherical_latent.append(loss_spherical_latent)
 
+            if not es_lorentz_naive:  # Lorentz
+                rsgd_lorentz_naive.zero_grad()
+                loss_lorentz_naive = model_lorentz_naive.lik_y_given_z(
+                    pairs, labels).mean()
+                loss_lorentz_naive.backward()
+                rsgd_lorentz_naive.step()
+                losses_lorentz_naive.append(loss_lorentz_naive)
+
+            if not es_euclidean_naive:  # Euclidean
+                rsgd_euclidean_naive.zero_grad()
+                loss_euclidean_naive = model_euclidean_naive.lik_y_given_z(
+                    pairs, labels).mean()
+                loss_euclidean_naive.backward()
+                rsgd_euclidean_naive.step()
+                losses_euclidean_naive.append(loss_euclidean_naive)
+
+            if not es_spherical_naive:  # Spherical
+                rsgd_spherical_naive.zero_grad()
+                loss_spherical_naive = model_spherical_naive.lik_y_given_z(
+                    pairs, labels).mean()
+                loss_spherical_naive.backward()
+                rsgd_spherical_naive.step()
+                losses_spherical_naive.append(loss_spherical_naive)
+
         print("epoch:", epoch)
         if not es_lorentz_latent:  # Lorentz
-            loss_lorentz = torch.Tensor(losses_lorentz_latent).mean().item()
-            print("loss_lorentz:", loss_lorentz)
+            loss_lorentz_latent = torch.Tensor(
+                losses_lorentz_latent).mean().item()
+            print("loss_lorentz_latent:", loss_lorentz_latent)
             if epoch > change_learning_rate:
-                if loss_lorentz < loss_lorentz_latent_best:
-                    loss_lorentz_latent_best = loss_lorentz
+                if loss_lorentz_latent < loss_lorentz_latent_best:
+                    loss_lorentz_latent_best = loss_lorentz_latent
                     es_count_lorentz_latent = 0
                 else:
                     es_count_lorentz_latent += 1
                 print("es_count_lorentz_latent:", es_count_lorentz_latent)
                 print("loss_lorentz_latent_best:", loss_lorentz_latent_best)
                 if es_count_lorentz_latent > early_stopping:
-                    print("early stopping for lorentz")
+                    print("early stopping for lorentz latent")
                     es_lorentz_latent = True
 
         if not es_euclidean_latent:  # Euclidean
-            loss_euclidean = torch.Tensor(
+            loss_euclidean_latent = torch.Tensor(
                 losses_euclidean_latent).mean().item()
-            print("loss_euclidean:", loss_euclidean)
+            print("loss_euclidean_latent:", loss_euclidean_latent)
             if epoch > change_learning_rate:
-                if loss_euclidean < loss_euclidean_latent_best:
-                    loss_euclidean_latent_best = loss_euclidean
+                if loss_euclidean_latent < loss_euclidean_latent_best:
+                    loss_euclidean_latent_best = loss_euclidean_latent
                     es_count_euclidean_latent = 0
                 else:
                     es_count_euclidean_latent += 1
@@ -1038,16 +1164,16 @@ def LinkPrediction(
                 print("loss_euclidean_latent_best:",
                       loss_euclidean_latent_best)
                 if es_count_euclidean_latent > early_stopping:
-                    print("early stopping for euclidean")
+                    print("early stopping for euclidean latent")
                     es_euclidean_latent = True
 
         if not es_spherical_latent:  # Spherical
-            loss_spherical = torch.Tensor(
+            loss_spherical_latent = torch.Tensor(
                 losses_spherical_latent).mean().item()
-            print("loss_spherical:", loss_spherical)
+            print("loss_spherical_latent:", loss_spherical_latent)
             if epoch > change_learning_rate:
-                if loss_spherical < loss_spherical_latent_best:
-                    loss_spherical_latent_best = loss_spherical
+                if loss_spherical_latent < loss_spherical_latent_best:
+                    loss_spherical_latent_best = loss_spherical_latent
                     es_count_spherical_latent = 0
                 else:
                     es_count_spherical_latent += 1
@@ -1055,15 +1181,58 @@ def LinkPrediction(
                 print("loss_spherical_latent_best:",
                       loss_spherical_latent_best)
                 if es_count_spherical_latent > early_stopping:
-                    print("early stopping for spherical")
+                    print("early stopping for spherical latent")
                     es_spherical_latent = True
 
-        # if es_euclidean_latent:  # Euclidean
-        #     print("loss_euclidean:",
-        #           torch.Tensor(losses_euclidean_latent).mean().item())
-        # if es_spherical_latent:  # Spherical
-        #     print("loss_spherical:",
-        #           torch.Tensor(losses_spherical_latent).mean().item())
+        if not es_lorentz_naive:  # Lorentz
+            loss_lorentz_naive = torch.Tensor(
+                losses_lorentz_naive).mean().item()
+            print("loss_lorentz_naive:", loss_lorentz_naive)
+            if epoch > change_learning_rate:
+                if loss_lorentz_naive < loss_lorentz_naive_best:
+                    loss_lorentz_naive_best = loss_lorentz_naive
+                    es_count_lorentz_naive = 0
+                else:
+                    es_count_lorentz_naive += 1
+                print("es_count_lorentz_naive:", es_count_lorentz_naive)
+                print("loss_lorentz_naive_best:", loss_lorentz_naive_best)
+                if es_count_lorentz_naive > early_stopping:
+                    print("early stopping for lorentz naive")
+                    es_lorentz_naive = True
+
+        if not es_euclidean_naive:  # Euclidean
+            loss_euclidean_naive = torch.Tensor(
+                losses_euclidean_naive).mean().item()
+            print("loss_euclidean_naive:", loss_euclidean_naive)
+            if epoch > change_learning_rate:
+                if loss_euclidean_naive < loss_euclidean_naive_best:
+                    loss_euclidean_naive_best = loss_euclidean_naive
+                    es_count_euclidean_naive = 0
+                else:
+                    es_count_euclidean_naive += 1
+                print("es_count_euclidean_naive:", es_count_euclidean_naive)
+                print("loss_euclidean_naive_best:",
+                      loss_euclidean_naive_best)
+                if es_count_euclidean_naive > early_stopping:
+                    print("early stopping for euclidean naive")
+                    es_euclidean_naive = True
+
+        if not es_spherical_naive:  # Spherical
+            loss_spherical_naive = torch.Tensor(
+                losses_spherical_naive).mean().item()
+            print("loss_spherical_naive:", loss_spherical_naive)
+            if epoch > change_learning_rate:
+                if loss_spherical_naive < loss_spherical_naive_best:
+                    loss_spherical_naive_best = loss_spherical_naive
+                    es_count_spherical_naive = 0
+                else:
+                    es_count_spherical_naive += 1
+                print("es_count_spherical_naive:", es_count_spherical_naive)
+                print("loss_spherical_naive_best:",
+                      loss_spherical_naive_best)
+                if es_count_spherical_naive > early_stopping:
+                    print("early stopping for spherical naive")
+                    es_spherical_naive = True
 
     elapsed_time = time.time() - start
     print("elapsed_time:{0}".format(elapsed_time) + "[sec]")
@@ -1078,40 +1247,68 @@ def LinkPrediction(
     )
 
     # 尤度計算
-    basescore_y_given_z_lorentz = 0
-    basescore_y_given_z_euclidean = 0
-    basescore_y_given_z_spherical = 0
+    basescore_y_given_z_lorentz_latent = 0
+    basescore_y_given_z_euclidean_latent = 0
+    basescore_y_given_z_spherical_latent = 0
+    basescore_y_given_z_lorentz_naive = 0
+    basescore_y_given_z_euclidean_naive = 0
+    basescore_y_given_z_spherical_naive = 0
 
     for pairs, labels in dataloader_all:
         pairs = pairs.to(device)
         labels = labels.to(device)
 
-        basescore_y_given_z_lorentz += model_lorentz_latent.lik_y_given_z(
+        basescore_y_given_z_lorentz_latent += model_lorentz_latent.lik_y_given_z(
             pairs, labels).sum().item()
-        basescore_y_given_z_euclidean += model_euclidean_latent.lik_y_given_z(
+        basescore_y_given_z_euclidean_latent += model_euclidean_latent.lik_y_given_z(
             pairs, labels).sum().item()
-        basescore_y_given_z_spherical += model_spherical_latent.lik_y_given_z(
+        basescore_y_given_z_spherical_latent += model_spherical_latent.lik_y_given_z(
+            pairs, labels).sum().item()
+        basescore_y_given_z_lorentz_naive += model_lorentz_naive.lik_y_given_z(
+            pairs, labels).sum().item()
+        basescore_y_given_z_euclidean_naive += model_euclidean_naive.lik_y_given_z(
+            pairs, labels).sum().item()
+        basescore_y_given_z_spherical_naive += model_spherical_naive.lik_y_given_z(
             pairs, labels).sum().item()
 
-    basescore_z_lorentz = model_lorentz_latent.z()
-    basescore_z_euclidean = model_euclidean_latent.z()
-    basescore_z_spherical = model_spherical_latent.z()
+    basescore_z_lorentz_latent = model_lorentz_latent.z()
+    basescore_z_euclidean_latent = model_euclidean_latent.z()
+    basescore_z_spherical_latent = model_spherical_latent.z()
+    # basescore_z_lorentz_naive = model_lorentz_naive.z()
+    # basescore_z_euclidean_naive = model_euclidean_naive.z()
+    # basescore_z_spherical_naive = model_spherical_naive.z()
 
     # the number of true data
     n_data = params_dataset['n_nodes'] * (params_dataset['n_nodes'] - 1) / 2
 
-    basescore_y_given_z_lorentz = basescore_y_given_z_lorentz * \
+    basescore_y_given_z_lorentz_latent = basescore_y_given_z_lorentz_latent * \
         (n_data / len(lik_data))
-    basescore_y_given_z_euclidean = basescore_y_given_z_euclidean * \
+    basescore_y_given_z_euclidean_latent = basescore_y_given_z_euclidean_latent * \
         (n_data / len(lik_data))
-    basescore_y_given_z_spherical = basescore_y_given_z_spherical * \
+    basescore_y_given_z_spherical_latent = basescore_y_given_z_spherical_latent * \
+        (n_data / len(lik_data))
+    basescore_y_given_z_lorentz_naive = basescore_y_given_z_lorentz_naive * \
+        (n_data / len(lik_data))
+    basescore_y_given_z_euclidean_naive = basescore_y_given_z_euclidean_naive * \
+        (n_data / len(lik_data))
+    basescore_y_given_z_spherical_naive = basescore_y_given_z_spherical_naive * \
         (n_data / len(lik_data))
 
-    basescore_y_and_z_lorentz = basescore_y_given_z_lorentz + basescore_z_lorentz
-    basescore_y_and_z_euclidean = basescore_y_given_z_euclidean + basescore_z_euclidean
-    basescore_y_and_z_spherical = basescore_y_given_z_spherical + basescore_z_spherical
+    basescore_y_and_z_lorentz_latent = basescore_y_given_z_lorentz_latent + \
+        basescore_z_lorentz_latent
+    basescore_y_and_z_euclidean_latent = basescore_y_given_z_euclidean_latent + \
+        basescore_z_euclidean_latent
+    basescore_y_and_z_spherical_latent = basescore_y_given_z_spherical_latent + \
+        basescore_z_spherical_latent
+    # basescore_y_and_z_lorentz_naive = basescore_y_given_z_lorentz_naive + \
+    #     basescore_z_lorentz_naive
+    # basescore_y_and_z_euclidean_naive = basescore_y_given_z_euclidean_naive + \
+    #     basescore_z_euclidean_naive
+    # basescore_y_and_z_spherical_naive = basescore_y_given_z_spherical_naive + \
+    #     basescore_z_spherical_naive
 
     # Lorentz
+    # latent
     pc_lorentz_first, pc_lorentz_second = model_lorentz_latent.get_PC(
         gamma_min,
         gamma_max,
@@ -1119,12 +1316,19 @@ def LinkPrediction(
         sigma_max,
         sampling=True
     )
-    DNML_lorentz = basescore_y_and_z_lorentz + pc_lorentz_first + pc_lorentz_second
-    AIC_lorentz = basescore_y_and_z_lorentz + model_n_dim + 2
-    BIC_lorentz = basescore_y_and_z_lorentz + np.log(params_dataset["n_nodes"]) + np.log(
-        params_dataset["n_nodes"] - 1) - np.log(2) + 0.5 * model_n_dim * np.log(params_dataset["n_nodes"])
+    DNML_lorentz_latent = basescore_y_and_z_lorentz_latent + \
+        pc_lorentz_first + pc_lorentz_second
+    AIC_lorentz_latent = basescore_y_and_z_lorentz_latent + model_n_dim + 1
+    BIC_lorentz_latent = basescore_y_and_z_lorentz_latent + 0.5* (np.log(params_dataset["n_nodes"]) + np.log(
+        params_dataset["n_nodes"] - 1) - np.log(2)) + 0.5 * model_n_dim * np.log(params_dataset["n_nodes"])
+    # naive
+    AIC_lorentz_naive = basescore_y_given_z_lorentz_naive + \
+        params_dataset["n_nodes"] * model_n_dim + 1
+    BIC_lorentz_naive = basescore_y_given_z_lorentz_naive + 0.5 * (params_dataset["n_nodes"] * model_n_dim + 1) * (
+        np.log(params_dataset["n_nodes"]) + np.log(params_dataset["n_nodes"] - 1) - np.log(2))
 
     # Euclidean
+    # latent
     pc_euclidean_first, pc_euclidean_second = model_euclidean_latent.get_PC(
         gamma_min,
         gamma_max,
@@ -1132,13 +1336,19 @@ def LinkPrediction(
         sigma_max,
         sampling=True
     )
-    DNML_euclidean = basescore_y_and_z_euclidean + \
+    DNML_euclidean_latent = basescore_y_and_z_euclidean_latent + \
         pc_euclidean_first + pc_euclidean_second
-    AIC_euclidean = basescore_y_and_z_euclidean + model_n_dim + 2
-    BIC_euclidean = basescore_y_and_z_euclidean + np.log(params_dataset["n_nodes"]) + np.log(
-        params_dataset["n_nodes"] - 1) - np.log(2) + 0.5 * model_n_dim * np.log(params_dataset["n_nodes"])
+    AIC_euclidean_latent = basescore_y_and_z_euclidean_latent + model_n_dim + 1
+    BIC_euclidean_latent = basescore_y_and_z_euclidean_latent + 0.5 * (np.log(params_dataset["n_nodes"]) + np.log(
+        params_dataset["n_nodes"] - 1) - np.log(2)) + 0.5 * model_n_dim * np.log(params_dataset["n_nodes"])
+    # naive
+    AIC_euclidean_naive = basescore_y_given_z_euclidean_naive + \
+        params_dataset["n_nodes"] * model_n_dim + 1
+    BIC_euclidean_naive = basescore_y_given_z_euclidean_naive + 0.5 * (params_dataset["n_nodes"] * model_n_dim + 1) * (
+        np.log(params_dataset["n_nodes"]) + np.log(params_dataset["n_nodes"] - 1) - np.log(2))
 
     # Spherical
+    # latent
     pc_spherical_first, pc_spherical_second = model_spherical_latent.get_PC(
         gamma_min,
         gamma_max,
@@ -1146,11 +1356,17 @@ def LinkPrediction(
         sigma_max,
         sampling=True
     )
-    DNML_spherical = basescore_y_and_z_spherical + \
+    DNML_spherical_latent = basescore_y_and_z_spherical_latent + \
         pc_spherical_first + pc_spherical_second
-    AIC_spherical = basescore_y_and_z_spherical + model_n_dim + 2
-    BIC_spherical = basescore_y_and_z_spherical + np.log(params_dataset["n_nodes"]) + np.log(
-        params_dataset["n_nodes"] - 1) - np.log(2) + 0.5 * model_n_dim * np.log(params_dataset["n_nodes"])
+    AIC_spherical_latent = basescore_y_and_z_spherical_latent + model_n_dim + 1
+    BIC_spherical_latent = basescore_y_and_z_spherical_latent + 0.5 * (np.log(params_dataset["n_nodes"]) + np.log(
+        params_dataset["n_nodes"] - 1) - np.log(2)) + 0.5 * model_n_dim * np.log(params_dataset["n_nodes"])
+    # naive
+    AIC_spherical_naive = basescore_y_given_z_spherical_naive + \
+        params_dataset["n_nodes"] * model_n_dim + 1
+    BIC_spherical_naive = basescore_y_given_z_spherical_naive + 0.5 * (params_dataset["n_nodes"] * model_n_dim + 1) * (
+        np.log(params_dataset["n_nodes"]) + np.log(params_dataset["n_nodes"] - 1) - np.log(2))
+
 
     if calc_othermetrics:
 
@@ -1170,74 +1386,115 @@ def LinkPrediction(
             return AUC
 
         # latentを計算したものでのAUC
-        AUC_lorentz = calc_AUC_from_prob(
+        AUC_lorentz_latent = calc_AUC_from_prob(
             model_lorentz_latent.calc_dist(positive_samples),
             model_lorentz_latent.calc_dist(negative_samples)
         )
         # latentを計算したものでのAUC
-        AUC_euclidean = calc_AUC_from_prob(
+        AUC_euclidean_latent = calc_AUC_from_prob(
             model_euclidean_latent.calc_dist(positive_samples),
             model_euclidean_latent.calc_dist(negative_samples)
         )
-        AUC_spherical = calc_AUC_from_prob(
+        AUC_spherical_latent = calc_AUC_from_prob(
             model_spherical_latent.calc_dist(positive_samples),
             model_spherical_latent.calc_dist(negative_samples)
         )
+        # naive
+        AUC_lorentz_naive = calc_AUC_from_prob(
+            model_lorentz_naive.calc_dist(positive_samples),
+            model_lorentz_naive.calc_dist(negative_samples)
+        )
+        # latentを計算したものでのAUC
+        AUC_euclidean_naive = calc_AUC_from_prob(
+            model_euclidean_naive.calc_dist(positive_samples),
+            model_euclidean_naive.calc_dist(negative_samples)
+        )
+        AUC_spherical_naive = calc_AUC_from_prob(
+            model_spherical_naive.calc_dist(positive_samples),
+            model_spherical_naive.calc_dist(negative_samples)
+        )
     else:
-        AUC_lorentz = None
-        AUC_euclidean = None
-        AUC_spherical = None
+        AUC_lorentz_latent = None
+        AUC_euclidean_latent = None
+        AUC_spherical_latent = None
+        AUC_lorentz_naive = None
+        AUC_euclidean_naive = None
+        AUC_spherical_naive = None
 
-    print("-log p_lorentz(y, z):", basescore_y_and_z_lorentz)
-    print("-log p_lorentz(y|z):", basescore_y_given_z_lorentz)
-    print("-log p_lorentz(z):", basescore_z_lorentz)
+    print("DNML_lorentz_latent:", DNML_lorentz_latent)
+    print("DNML_euclidean_latent:", DNML_euclidean_latent)
+    print("DNML_spherical_latent:", DNML_spherical_latent)
+    print("AIC_lorentz_latent:", AIC_lorentz_latent)
+    print("AIC_euclidean_latent:", AIC_euclidean_latent)
+    print("AIC_spherical_latent:", AIC_spherical_latent)
+    print("BIC_lorentz_latent:", BIC_lorentz_latent)
+    print("BIC_euclidean_latent:", BIC_euclidean_latent)
+    print("BIC_spherical_latent:", BIC_spherical_latent)
+    print("AIC_lorentz_naive:", AIC_lorentz_naive)
+    print("AIC_euclidean_naive:", AIC_euclidean_naive)
+    print("AIC_spherical_naive:", AIC_spherical_naive)
+    print("BIC_lorentz_naive:", BIC_lorentz_naive)
+    print("BIC_euclidean_naive:", BIC_euclidean_naive)
+    print("BIC_spherical_naive:", BIC_spherical_naive)
+    print("-log p_lorentz_latent(y, z):", basescore_y_and_z_lorentz_latent)
+    print("-log p_lorentz_latent(y|z):", basescore_y_given_z_lorentz_latent)
+    print("-log p_lorentz_latent(z):", basescore_z_lorentz_latent)
+    print("-log p_lorentz_naive(y|z):", basescore_y_given_z_lorentz_naive)
     print("pc_lorentz_first", pc_lorentz_first)
     print("pc_lorentz_second", pc_lorentz_second)
-    print("DNML-lorentz:", DNML_lorentz)
-    print("AIC_lorentz:", AIC_lorentz)
-    print("BIC_lorentz:", BIC_lorentz)
-    print("-log p_euclidean(y, z):", basescore_y_and_z_euclidean)
-    print("-log p_euclidean(y|z):", basescore_y_given_z_euclidean)
-    print("-log p_euclidean(z):", basescore_z_euclidean)
+    print("-log p_euclidean_latent(y, z):", basescore_y_and_z_euclidean_latent)
+    print("-log p_euclidean_latent(y|z):", basescore_y_given_z_euclidean_latent)
+    print("-log p_euclidean_latent(z):", basescore_z_euclidean_latent)
+    print("-log p_euclidean_naive(y|z):", basescore_y_given_z_euclidean_naive)
     print("pc_euclidean_first", pc_euclidean_first)
     print("pc_euclidean_second", pc_euclidean_second)
-    print("DNML-euclidean:", DNML_euclidean)
-    print("AIC_euclidean:", AIC_euclidean)
-    print("BIC_euclidean:", BIC_euclidean)
-    print("-log p_spherical(y, z):", basescore_y_and_z_spherical)
-    print("-log p_spherical(y|z):", basescore_y_given_z_spherical)
-    print("-log p_spherical(z):", basescore_z_spherical)
+    print("-log p_spherical_latent(y, z):", basescore_y_and_z_spherical_latent)
+    print("-log p_spherical_latent(y|z):", basescore_y_given_z_spherical_latent)
+    print("-log p_spherical_latent(z):", basescore_z_spherical_latent)
+    print("-log p_spherical_naive(y|z):", basescore_y_given_z_spherical_naive)
     print("pc_spherical_first", pc_spherical_first)
     print("pc_spherical_second", pc_spherical_second)
-    print("DNML-spherical:", DNML_spherical)
-    print("AIC_spherical:", AIC_spherical)
-    print("BIC_spherical:", BIC_spherical)
-    print("AUC_lorentz:", AUC_lorentz)
-    print("AUC_euclidean:", AUC_euclidean)
-    print("AUC_spherical:", AUC_spherical)
+    print("AUC_lorentz_latent:", AUC_lorentz_latent)
+    print("AUC_euclidean_latent:", AUC_euclidean_latent)
+    print("AUC_spherical_latent:", AUC_spherical_latent)
+    print("AUC_lorentz_naive:", AUC_lorentz_naive)
+    print("AUC_euclidean_naive:", AUC_euclidean_naive)
+    print("AUC_spherical_naive:", AUC_spherical_naive)
 
     ret = {
-        "DNML_lorentz": DNML_lorentz,
-        "DNML_euclidean": DNML_euclidean,
-        "DNML_spherical": DNML_spherical,
-        "AIC_lorentz": AIC_lorentz,
-        "AIC_euclidean": AIC_euclidean,
-        "AIC_spherical": AIC_spherical,
-        "BIC_lorentz": BIC_lorentz,
-        "BIC_euclidean": BIC_euclidean,
-        "BIC_spherical": BIC_spherical,
-        "AUC_lorentz": AUC_lorentz,
-        "AUC_euclidean": AUC_euclidean,
-        "AUC_spherical": AUC_spherical,
-        "-log p_lorentz(y, z)": basescore_y_and_z_lorentz,
-        "-log p_lorentz(y|z)": basescore_y_given_z_lorentz,
-        "-log p_lorentz(z)": basescore_z_lorentz,
-        "-log p_euclidean(y, z)": basescore_y_and_z_euclidean,
-        "-log p_euclidean(y|z)": basescore_y_given_z_euclidean,
-        "-log p_euclidean(z)": basescore_z_euclidean,
-        "-log p_spherical(y, z)": basescore_y_and_z_spherical,
-        "-log p_spherical(y|z)": basescore_y_given_z_spherical,
-        "-log p_spherical(z)": basescore_z_spherical,
+        "DNML_lorentz_latent": DNML_lorentz_latent,
+        "DNML_euclidean_latent": DNML_euclidean_latent,
+        "DNML_spherical_latent": DNML_spherical_latent,
+        "AIC_lorentz_latent": AIC_lorentz_latent,
+        "AIC_euclidean_latent": AIC_euclidean_latent,
+        "AIC_spherical_latent": AIC_spherical_latent,
+        "AIC_lorentz_naive": AIC_lorentz_naive,
+        "AIC_euclidean_naive": AIC_euclidean_naive,
+        "AIC_spherical_naive": AIC_spherical_naive,
+        "BIC_lorentz_latent": BIC_lorentz_latent,
+        "BIC_euclidean_latent": BIC_euclidean_latent,
+        "BIC_spherical_latent": BIC_spherical_latent,
+        "BIC_lorentz_naive": BIC_lorentz_naive,
+        "BIC_euclidean_naive": BIC_euclidean_naive,
+        "BIC_spherical_naive": BIC_spherical_naive,
+        "AUC_lorentz_latent": AUC_lorentz_latent,
+        "AUC_euclidean_latent": AUC_euclidean_latent,
+        "AUC_spherical_latent": AUC_spherical_latent,
+        "AUC_lorentz_naive": AUC_lorentz_naive,
+        "AUC_euclidean_naive": AUC_euclidean_naive,
+        "AUC_spherical_naive": AUC_spherical_naive,
+        "-log p_lorentz_latent(y, z)": basescore_y_and_z_lorentz_latent,
+        "-log p_lorentz_latent(y|z)": basescore_y_given_z_lorentz_latent,
+        "-log p_lorentz_latent(z)": basescore_z_lorentz_latent,
+        "-log p_lorentz_naive(y|z)": basescore_y_given_z_lorentz_naive,
+        "-log p_euclidean_latent(y, z)": basescore_y_and_z_euclidean_latent,
+        "-log p_euclidean_latent(y|z)": basescore_y_given_z_euclidean_latent,
+        "-log p_euclidean_latent(z)": basescore_z_euclidean_latent,
+        "-log p_euclidean_naive(y|z)": basescore_y_given_z_euclidean_naive,
+        "-log p_spherical_latent(y, z)": basescore_y_and_z_spherical_latent,
+        "-log p_spherical_latent(y|z)": basescore_y_given_z_spherical_latent,
+        "-log p_spherical_latent(z)": basescore_z_spherical_latent,
+        "-log p_spherical_naive(y|z)": basescore_y_given_z_spherical_naive,
         "pc_lorentz_first": pc_lorentz_first,
         "pc_lorentz_second": pc_lorentz_second,
         "pc_euclidean_first": pc_euclidean_first,
@@ -1246,14 +1503,17 @@ def LinkPrediction(
         "pc_spherical_second": pc_spherical_second,
         "model_lorentz_latent": model_lorentz_latent,
         "model_euclidean_latent": model_euclidean_latent,
-        "model_spherical_latent": model_spherical_latent
+        "model_spherical_latent": model_spherical_latent,
+        "model_lorentz_naive": model_lorentz_naive,
+        "model_euclidean_naive": model_euclidean_naive,
+        "model_spherical_naive": model_spherical_naive
     }
 
     return ret
 
 if __name__ == '__main__':
     # creating dataset
-    n_nodes = 3200
+    n_nodes = 400
     # n_nodes = 400
 
     print("R:", np.log(n_nodes))
@@ -1261,20 +1521,22 @@ if __name__ == '__main__':
     params_dataset = {
         'n_nodes': n_nodes,
         'n_dim': 4,
-        'R': np.log(n_nodes)+2,
+        'R': np.log(n_nodes) + 2,
         'sigma': 2,
         'beta': 0.4
     }
 
     # parameters
     burn_epochs = 800
+    # burn_epochs = 20
     # burn_epochs = 5
     burn_batch_size = min(int(params_dataset["n_nodes"] * 0.2), 100)
     n_max_positives = min(int(params_dataset["n_nodes"] * 0.02), 10)
-    lr_kappa = 0.01
+    lr_kappa = 1
+    # lr_kappa = 0.01
     lr_gamma = 0.01
     sigma_max = 100.0
-    sigma_min = 0.2
+    sigma_min = 0.01
     k_max = 100.0
     gamma_min = 0.1
     gamma_max = 10.0
@@ -1303,9 +1565,9 @@ if __name__ == '__main__':
 
     result = pd.DataFrame()
 
-    model_n_dims = [64]
+    # model_n_dims = [64]
     # model_n_dims = [32]
-    # model_n_dims = [4]
+    model_n_dims = [4]
 
     positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
         adj_mat=adj_mat,
@@ -1349,9 +1611,12 @@ if __name__ == '__main__':
             change_learning_rate=change_learning_rate,
             init_range=init_range,
             device=device,
-            calc_lorentz=True,
-            calc_euclidean=True,
-            calc_spherical=True,
+            calc_lorentz_latent=True,
+            calc_euclidean_latent=True,
+            calc_spherical_latent=True,
+            calc_lorentz_naive=True,
+            calc_euclidean_naive=True,
+            calc_spherical_naive=True,
             calc_othermetrics=True,
             loader_workers=16,
             shuffle=True,
@@ -1364,10 +1629,19 @@ if __name__ == '__main__':
                    "temp/result_" + str(model_n_dim) + "_euclidean_latent.pth")
         torch.save(ret["model_spherical_latent"],
                    "temp/result_" + str(model_n_dim) + "_spherical_latent.pth")
+        torch.save(ret["model_lorentz_naive"],
+                   "temp/result_" + str(model_n_dim) + "_lorentz_naive.pth")
+        torch.save(ret["model_euclidean_naive"],
+                   "temp/result_" + str(model_n_dim) + "_euclidean_naive.pth")
+        torch.save(ret["model_spherical_naive"],
+                   "temp/result_" + str(model_n_dim) + "_spherical_naive.pth")
 
         ret.pop('model_lorentz_latent')
         ret.pop('model_euclidean_latent')
         ret.pop('model_spherical_latent')
+        ret.pop('model_lorentz_naive')
+        ret.pop('model_euclidean_naive')
+        ret.pop('model_spherical_naive')
 
         ret["model_n_dims"] = model_n_dim
         ret["n_nodes"] = params_dataset["n_nodes"]
@@ -1399,27 +1673,39 @@ if __name__ == '__main__':
             "R",
             "sigma",
             "beta",
-            "DNML_lorentz",
-            "DNML_euclidean",
-            "DNML_spherical",
-            "AIC_lorentz",
-            "AIC_euclidean",
-            "AIC_spherical",
-            "BIC_lorentz",
-            "BIC_euclidean",
-            "BIC_spherical",
-            "AUC_lorentz",
-            "AUC_euclidean",
-            "AUC_spherical",
-            "-log p_lorentz(y, z)",
-            "-log p_lorentz(y|z)",
-            "-log p_lorentz(z)",
-            "-log p_euclidean(y, z)",
-            "-log p_euclidean(y|z)",
-            "-log p_euclidean(z)",
-            "-log p_spherical(y, z)",
-            "-log p_spherical(y|z)",
-            "-log p_spherical(z)",
+            "DNML_lorentz_latent",
+            "DNML_euclidean_latent",
+            "DNML_spherical_latent",
+            "AIC_lorentz_latent",
+            "AIC_euclidean_latent",
+            "AIC_spherical_latent",
+            "AIC_lorentz_naive",
+            "AIC_euclidean_naive",
+            "AIC_spherical_naive",
+            "BIC_lorentz_latent",
+            "BIC_euclidean_latent",
+            "BIC_spherical_latent",
+            "BIC_lorentz_naive",
+            "BIC_euclidean_naive",
+            "BIC_spherical_naive",
+            "AUC_lorentz_latent",
+            "AUC_euclidean_latent",
+            "AUC_spherical_latent",
+            "AUC_lorentz_naive",
+            "AUC_euclidean_naive",
+            "AUC_spherical_naive",
+            "-log p_lorentz_latent(y, z)",
+            "-log p_lorentz_latent(y|z)",
+            "-log p_lorentz_latent(z)",
+            "-log p_lorentz_naive(y|z)",
+            "-log p_euclidean_latent(y, z)",
+            "-log p_euclidean_latent(y|z)",
+            "-log p_euclidean_latent(z)",
+            "-log p_euclidean_naive(y|z)",
+            "-log p_spherical_latent(y, z)",
+            "-log p_spherical_latent(y|z)",
+            "-log p_spherical_latent(z)",
+            "-log p_spherical_naive(y|z)",
             "pc_lorentz_first",
             "pc_lorentz_second",
             "pc_euclidean_first",

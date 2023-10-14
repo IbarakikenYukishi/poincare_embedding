@@ -43,22 +43,34 @@ def multigamma_ln(a, d):
     return special.multigammaln(a, d)
 
 
+# def sqrt_I_n(
+#     beta,
+#     gamma,
+#     X,
+#     n_nodes_sample
+# ):
+#     I_1_1 = np.sum(X**2 / ((np.cosh((beta * X - gamma) / 2.0) * 2)
+#                            ** 2)) / (n_nodes_sample * (n_nodes_sample - 1))
+#     I_1_2 = np.sum(- X / ((np.cosh((beta * X - gamma) / 2.0) * 2)
+#                           ** 2)) / (n_nodes_sample * (n_nodes_sample - 1))
+#     I_2_2 = 1 / ((np.cosh((beta * X - gamma) / 2.0) * 2)**2)
+#     for i in range(n_nodes_sample):
+#         I_2_2[i, i] = 0
+#     I_2_2 = np.sum(I_2_2) / (n_nodes_sample * (n_nodes_sample - 1))
+
+#     return np.sqrt(np.abs(I_1_1 * I_2_2 - I_1_2 * I_1_2))
+
 def sqrt_I_n(
-    beta,
     gamma,
     X,
     n_nodes_sample
 ):
-    I_1_1 = np.sum(X**2 / ((np.cosh((beta * X - gamma) / 2.0) * 2)
-                           ** 2)) / (n_nodes_sample * (n_nodes_sample - 1))
-    I_1_2 = np.sum(- X / ((np.cosh((beta * X - gamma) / 2.0) * 2)
-                          ** 2)) / (n_nodes_sample * (n_nodes_sample - 1))
-    I_2_2 = 1 / ((np.cosh((beta * X - gamma) / 2.0) * 2)**2)
+    I_n = 1 / ((np.cosh((X - gamma) / 2.0) * 2)**2)
     for i in range(n_nodes_sample):
-        I_2_2[i, i] = 0
-    I_2_2 = np.sum(I_2_2) / (n_nodes_sample * (n_nodes_sample - 1))
+        I_n[i, i] = 0
+    I_n = np.abs(np.sum(I_n) / (n_nodes_sample * (n_nodes_sample - 1)))
 
-    return np.sqrt(np.abs(I_1_1 * I_2_2 - I_1_2 * I_1_2))
+    return I_n
 
 
 def sin_k(
@@ -286,7 +298,7 @@ def projection_k(
     if k == 0:
         return x
     elif k > 0:
-        return x/torch.norm(x, p=2, dim=1, keepdim=True)
+        return k * x / torch.norm(x, p=2, dim=1, keepdim=True)
     else:
         x[:, 1:] = torch.renorm(x[:, 1:], p=2, dim=0,
                                 maxnorm=np.sinh(R) / np.sqrt(abs(k)))  # 半径Rの範囲に収めたい

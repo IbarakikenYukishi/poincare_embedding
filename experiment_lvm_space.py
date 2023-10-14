@@ -247,12 +247,21 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
 
+    # if args.n_nodes == "0":
+    #     n_nodes_list = [400, 800, 1600]
+    # elif args.n_nodes == "1":
+    #     n_nodes_list = [3200]
+    # elif args.n_nodes == "2":
+    #     n_nodes_list = [6400]
+
     if args.n_nodes == "0":
-        n_nodes_list = [400, 800, 1600]
+        n_nodes_list = [400]
     elif args.n_nodes == "1":
-        n_nodes_list = [3200]
+        n_nodes_list = [800]
     elif args.n_nodes == "2":
-        n_nodes_list = [6400]
+        n_nodes_list = [1600]
+    elif args.n_nodes == "3":
+        n_nodes_list = [3200]
 
     # model_n_dims = [2, 4, 8, 16, 32, 64]
     model_n_dims = [2, 4, 8, 16, 32]

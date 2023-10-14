@@ -14,10 +14,11 @@ from functools import partial
 from scipy.io import mmread
 from copy import deepcopy
 from torch.utils.data import DataLoader
-from lorentz import LinkPrediction
+# from lorentz import LinkPrediction
 from utils.utils import arcosh, h_dist
-from utils.utils_dataset import create_dataset_for_basescore
+from utils.utils_dataset import create_dataset_for_basescore, create_test_for_link_prediction
 from scipy import stats
+from scipy.sparse import coo_matrix
 
 
 RESULTS = "results"
@@ -61,6 +62,55 @@ def create_wn_dataset(dataset_name):
     }
 
     np.save("dataset/wn_dataset/" + dataset_name + "_data.npy", data)
+
+
+def create_wn_dataset_link(dataset_name):
+    df = pd.read_csv("dataset/wn_dataset/" + dataset_name + "_closure.csv")
+
+    node_names = set(df["id1"]) | set(df["id2"])
+    node_names = np.array(list(node_names))
+
+    n_nodes = len(node_names)
+
+    adj_mat = np.zeros((n_nodes, n_nodes))
+    is_a = np.zeros((len(df), 2))
+
+    for index, r in df.iterrows():
+        u = np.where(node_names == r[0])[0]
+        v = np.where(node_names == r[1])[0]
+        adj_mat[u, v] = 1
+        adj_mat[v, u] = 1
+
+        is_a[index, 0] = u
+        is_a[index, 1] = v
+
+    adj_mat = adj_mat.astype(np.int)
+    is_a = is_a.astype(np.int)
+
+    params_dataset = {
+        "n_nodes": n_nodes
+    }
+
+    print(node_names)
+    print(adj_mat)
+    print(np.sum(adj_mat))
+    print(is_a)
+
+    positive_samples, negative_samples, train_graph, lik_data = create_test_for_link_prediction(
+        adj_mat, params_dataset)
+
+    data = {
+        "adj_mat": coo_matrix(adj_mat),
+        "positive_samples": positive_samples,
+        "negative_samples": negative_samples,
+        "train_graph": coo_matrix(train_graph),
+        "lik_data": lik_data,
+    }
+
+    # print(data)
+
+    os.makedirs("dataset/" + dataset_name, exist_ok=True)
+    np.save('dataset/' + dataset_name + "/data.npy", data)
 
 
 def is_a_score(is_a, n_dim, lorentz_table, alpha=100, print_stats=False, print_is_a_score=False):
@@ -306,7 +356,7 @@ if __name__ == '__main__':
     elif int(args.dataset) == 2:
         dataset_name = "tree"
     elif int(args.dataset) == 3:
-        dataset_name = "worker"        
+        dataset_name = "worker"
     elif int(args.dataset) == 4:
         dataset_name = "adult"
     elif int(args.dataset) == 5:
@@ -320,5 +370,9 @@ if __name__ == '__main__':
 
     os.makedirs(RESULTS + "/" + dataset_name + "/", exist_ok=True)
 
-    calc_metrics_realworld(device_idx=device_idx,
-                           model_n_dim=model_n_dim, dataset_name=dataset_name)
+    # create_wn_dataset_link(dataset_name)
+    create_wn_dataset_link("mammal")
+    create_wn_dataset_link("solid")
+
+    # calc_metrics_realworld(device_idx=device_idx,
+    # model_n_dim=model_n_dim, dataset_name=dataset_name)
